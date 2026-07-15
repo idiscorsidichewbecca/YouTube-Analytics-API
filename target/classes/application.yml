@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: chewbecca-youtube-analytics-api
+  datasource:
+    url: jdbc:h2:file:./data/chewbecca-youtube;AUTO_SERVER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=500,expireAfterWrite=5m
+
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:896137815860-akk972k2nsbq3a5nsmltrm816imdfer4.apps.googleusercontent.com}
+    client-secret: ${GOOGLE_CLIENT_SECRET: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}
+    redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8080/oauth2/google/callback}
+    expected-channel-id: ${YOUTUBE_EXPECTED_CHANNEL_ID:UCBbo-I27HMOyk3lGoOYFF9w}
+    login-hint: ${GOOGLE_LOGIN_HINT:idiscorsidichewbecca@gmail.com}
+  security:
+    admin-username: ${ADMIN_USERNAME:admin}
+    admin-password: ${ADMIN_PASSWORD:change-me-admin}
+    gpt-api-key: ${GPT_ACTION_API_KEY:aa03fe2e46a69f1cf3e5f7a9f56b6c5d8a56300cfe4f8dda1e873f0617e6ada5}
+    token-encryption-key: ${TOKEN_ENCRYPTION_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    fail-on-default-secrets: false
+  youtube:
+    default-report-days: 28
+    shorts-duration-fallback-seconds: 180
+    shorts-duration-fallback-enabled: true
+    shorts-detection-start-date: 2020-09-14
+    max-page-size: 100
+    forced-short-ids: []
+    forced-video-ids: []
+
+logging:
+  level:
+    it.chewbecca.youtubeanalytics: INFO
