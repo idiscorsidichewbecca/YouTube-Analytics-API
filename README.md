@@ -256,6 +256,14 @@ Il GPT non deve usare il client ID o il client secret Google. Questi restano sol
 | GET | `/api/v1/content/{videoId}/trend` | Trend del contenuto |
 | GET | `/api/v1/content/{videoId}/traffic-sources` | Sorgenti di traffico |
 | GET | `/api/v1/content/{videoId}/countries` | Principali Paesi |
+| GET | `/api/v1/channel/subscription-status` | Confronto spettatori iscritti/non iscritti |
+| GET | `/api/v1/channel/devices` | Distribuzione per dispositivo |
+| GET | `/api/v1/channel/operating-systems` | Distribuzione per sistema operativo |
+| GET | `/api/v1/channel/demographics` | Distribuzione per età e genere |
+| GET | `/api/v1/content/{videoId}/retention` | Curva di fidelizzazione del pubblico |
+| GET | `/api/v1/content/{videoId}/subscription-status` | Iscritti/non iscritti per contenuto |
+| GET | `/api/v1/content/{videoId}/devices` | Dispositivi per contenuto |
+| GET | `/api/v1/content/{videoId}/traffic-source-details` | Dettaglio di una sorgente di traffico |
 | GET | `/admin/youtube/connect` | Avvia Google OAuth2 |
 | GET | `/admin/youtube/status` | Stato collegamento |
 | DELETE | `/admin/youtube/disconnect` | Rimuove token salvati |

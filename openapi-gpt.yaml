@@ -47,6 +47,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TrendResponse'
+  /api/v1/channel/subscription-status:
+    get:
+      operationId: getChannelSubscriptionStatus
+      summary: Confronta spettatori iscritti e non iscritti
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Breakdown per stato di iscrizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BreakdownResponse' }
+  /api/v1/channel/devices:
+    get:
+      operationId: getChannelDevices
+      summary: Ottiene la distribuzione per dispositivo
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Breakdown per tipo di dispositivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BreakdownResponse' }
+  /api/v1/channel/operating-systems:
+    get:
+      operationId: getChannelOperatingSystems
+      summary: Ottiene la distribuzione per sistema operativo
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 25 } }
+      responses:
+        '200':
+          description: Breakdown per sistema operativo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BreakdownResponse' }
+  /api/v1/channel/demographics:
+    get:
+      operationId: getChannelDemographics
+      summary: Ottiene la distribuzione demografica
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Distribuzione per età e genere
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemographicsResponse' }
   /api/v1/content:
     get:
       operationId: listContentPerformance
@@ -190,6 +243,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BreakdownResponse'
+  /api/v1/content/{videoId}/retention:
+    get:
+      operationId: getContentRetention
+      summary: Ottiene la curva di fidelizzazione del pubblico
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Curva di retention del contenuto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionResponse' }
+  /api/v1/content/{videoId}/subscription-status:
+    get:
+      operationId: getContentSubscriptionStatus
+      summary: Confronta spettatori iscritti e non iscritti
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Breakdown per stato di iscrizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BreakdownResponse' }
+  /api/v1/content/{videoId}/devices:
+    get:
+      operationId: getContentDevices
+      summary: Ottiene la distribuzione per dispositivo
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+      responses:
+        '200':
+          description: Breakdown per tipo di dispositivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BreakdownResponse' }
+  /api/v1/content/{videoId}/traffic-source-details:
+    get:
+      operationId: getContentTrafficSourceDetails
+      summary: Ottiene i dettagli di una sorgente di traffico
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - name: sourceType
+          in: query
+          required: true
+          description: Tipo restituito da traffic-sources, ad esempio YT_SEARCH o RELATED_VIDEO.
+          schema: { type: string }
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 25 } }
+      responses:
+        '200':
+          description: Dettagli della sorgente di traffico
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficSourceDetailsResponse' }
 components:
   securitySchemes:
     bearerApiKey:
@@ -368,6 +483,51 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/BreakdownItem' }
+    DemographicItem:
+      type: object
+      properties:
+        ageGroup: { type: string }
+        gender: { type: string }
+        viewerPercentage: { type: number, format: double }
+    DemographicsResponse:
+      type: object
+      properties:
+        period: { $ref: '#/components/schemas/ReportPeriod' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DemographicItem' }
+    RetentionPoint:
+      type: object
+      properties:
+        elapsedVideoTimeRatio: { type: number, format: double }
+        elapsedVideoPercentage: { type: number, format: double }
+        audienceWatchRatio: { type: number, format: double }
+        audienceWatchPercentage: { type: number, format: double }
+        relativeRetentionPerformance: { type: number, format: double }
+    RetentionResponse:
+      type: object
+      properties:
+        videoId: { type: string }
+        period: { $ref: '#/components/schemas/ReportPeriod' }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/RetentionPoint' }
+    TrafficSourceDetailItem:
+      type: object
+      properties:
+        detail: { type: string }
+        views: { type: integer, format: int64 }
+        estimatedMinutesWatched: { type: number, format: double }
+        estimatedHoursWatched: { type: number, format: double }
+    TrafficSourceDetailsResponse:
+      type: object
+      properties:
+        videoId: { type: string }
+        sourceType: { type: string }
+        period: { $ref: '#/components/schemas/ReportPeriod' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TrafficSourceDetailItem' }
     ApiError:
       type: object
       properties:

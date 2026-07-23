@@ -40,4 +40,37 @@ public class ChannelReportController {
             @RequestParam(defaultValue = "DAY") TrendGranularity granularity) {
         return reportService.channelTrend(startDate, endDate, granularity);
     }
+
+    @GetMapping("/subscription-status")
+    @Operation(operationId = "getChannelSubscriptionStatus", summary = "Confronta spettatori iscritti e non iscritti")
+    public ApiModels.BreakdownResponse subscriptionStatus(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.channelSubscriptionStatus(startDate, endDate);
+    }
+
+    @GetMapping("/devices")
+    @Operation(operationId = "getChannelDevices", summary = "Distribuzione delle visualizzazioni per dispositivo")
+    public ApiModels.BreakdownResponse devices(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.channelDevices(startDate, endDate);
+    }
+
+    @GetMapping("/operating-systems")
+    @Operation(operationId = "getChannelOperatingSystems", summary = "Distribuzione per sistema operativo")
+    public ApiModels.BreakdownResponse operatingSystems(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "25") int limit) {
+        return reportService.channelOperatingSystems(startDate, endDate, limit);
+    }
+
+    @GetMapping("/demographics")
+    @Operation(operationId = "getChannelDemographics", summary = "Distribuzione demografica per età e genere")
+    public ApiModels.DemographicsResponse demographics(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.channelDemographics(startDate, endDate);
+    }
 }

@@ -224,6 +224,122 @@ public class YouTubeAnalyticsClient {
                 .toList();
     }
 
+    public List<BreakdownMetric> getSubscriptionStatus(String videoId,
+                                                       LocalDate startDate,
+                                                       LocalDate endDate) {
+        String filter = StringUtils.hasText(videoId) ? "video==" + videoId : null;
+        return getStandardBreakdown("subscribedStatus", filter, startDate, endDate, null);
+    }
+
+    public List<BreakdownMetric> getDevices(String videoId,
+                                            LocalDate startDate,
+                                            LocalDate endDate) {
+        String filter = StringUtils.hasText(videoId) ? "video==" + videoId : null;
+        return getStandardBreakdown("deviceType", filter, startDate, endDate, null);
+    }
+
+    public List<BreakdownMetric> getOperatingSystems(String videoId,
+                                                     LocalDate startDate,
+                                                     LocalDate endDate,
+                                                     int limit) {
+        String filter = StringUtils.hasText(videoId) ? "video==" + videoId : null;
+        return getStandardBreakdown("operatingSystem", filter, startDate, endDate, limit);
+    }
+
+    public List<AudienceMetric> getDemographics(LocalDate startDate, LocalDate endDate) {
+        AnalyticsTable table = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                "viewerPercentage",
+                "ageGroup,gender",
+                null,
+                "-viewerPercentage",
+                null,
+                null
+        ));
+        return table.rows().stream()
+                .map(row -> new AudienceMetric(
+                        row.stringValue("ageGroup"),
+                        row.stringValue("gender"),
+                        row.doubleValue("viewerPercentage")
+                ))
+                .toList();
+    }
+
+    public List<RetentionMetric> getRetention(String videoId,
+                                              LocalDate startDate,
+                                              LocalDate endDate) {
+        AnalyticsTable table = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                "audienceWatchRatio,relativeRetentionPerformance",
+                "elapsedVideoTimeRatio",
+                "video==" + videoId,
+                "elapsedVideoTimeRatio",
+                null,
+                null
+        ));
+        return table.rows().stream()
+                .map(row -> new RetentionMetric(
+                        row.doubleValue("elapsedVideoTimeRatio"),
+                        row.doubleValue("audienceWatchRatio"),
+                        row.doubleValue("relativeRetentionPerformance")
+                ))
+                .toList();
+    }
+
+    public List<TrafficSourceDetailMetric> getTrafficSourceDetails(String videoId,
+                                                                   String sourceType,
+                                                                   LocalDate startDate,
+                                                                   LocalDate endDate,
+                                                                   int limit) {
+        AnalyticsTable table = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                "views,estimatedMinutesWatched",
+                "insightTrafficSourceDetail",
+                "video==" + videoId + ";insightTrafficSourceType==" + sourceType,
+                "-views",
+                limit,
+                null
+        ));
+        return table.rows().stream()
+                .map(row -> new TrafficSourceDetailMetric(
+                        row.stringValue("insightTrafficSourceDetail"),
+                        row.longValue("views"),
+                        row.doubleValue("estimatedMinutesWatched")
+                ))
+                .toList();
+    }
+
+    private List<BreakdownMetric> getStandardBreakdown(String dimension,
+                                                       String filter,
+                                                       LocalDate startDate,
+                                                       LocalDate endDate,
+                                                       Integer limit) {
+        AnalyticsTable table = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage",
+                dimension,
+                filter,
+                "-views",
+                limit,
+                null
+        ));
+        return table.rows().stream()
+                .map(row -> new BreakdownMetric(
+                        row.stringValue(dimension),
+                        0,
+                        row.longValue("views"),
+                        row.doubleValue("estimatedMinutesWatched"),
+                        row.doubleValue("averageViewDuration"),
+                        row.doubleValue("averageViewPercentage"),
+                        0
+                ))
+                .toList();
+    }
+
     public long getShortsFeedViews(String videoId, LocalDate startDate, LocalDate endDate) {
         return getTrafficSources(videoId, startDate, endDate).stream()
                 .filter(metric -> "SHORTS".equalsIgnoreCase(metric.dimensionValue()))
@@ -450,6 +566,23 @@ public class YouTubeAnalyticsClient {
             double averageViewDurationSeconds,
             double averageViewPercentage,
             long netSubscribers
+    ) {
+    }
+
+    public record AudienceMetric(String ageGroup, String gender, double viewerPercentage) {
+    }
+
+    public record RetentionMetric(
+            double elapsedVideoTimeRatio,
+            double audienceWatchRatio,
+            double relativeRetentionPerformance
+    ) {
+    }
+
+    public record TrafficSourceDetailMetric(
+            String detail,
+            long views,
+            double estimatedMinutesWatched
     ) {
     }
 }

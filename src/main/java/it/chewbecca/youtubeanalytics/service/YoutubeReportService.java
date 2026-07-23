@@ -227,6 +227,136 @@ public class YoutubeReportService {
         return new ApiModels.BreakdownResponse(videoId, "COUNTRY", reportPeriod(range), items);
     }
 
+    public ApiModels.BreakdownResponse channelSubscriptionStatus(LocalDate startDate, LocalDate endDate) {
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        return breakdownResponse(null, "SUBSCRIBED_STATUS", range,
+                analyticsClient.getSubscriptionStatus(null, range.startDate(), range.endDate()));
+    }
+
+    public ApiModels.BreakdownResponse contentSubscriptionStatus(String videoId,
+                                                                 LocalDate startDate,
+                                                                 LocalDate endDate) {
+        requireOwnedVideo(videoId);
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        return breakdownResponse(videoId, "SUBSCRIBED_STATUS", range,
+                analyticsClient.getSubscriptionStatus(videoId, range.startDate(), range.endDate()));
+    }
+
+    public ApiModels.BreakdownResponse channelDevices(LocalDate startDate, LocalDate endDate) {
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        return breakdownResponse(null, "DEVICE_TYPE", range,
+                analyticsClient.getDevices(null, range.startDate(), range.endDate()));
+    }
+
+    public ApiModels.BreakdownResponse contentDevices(String videoId,
+                                                      LocalDate startDate,
+                                                      LocalDate endDate) {
+        requireOwnedVideo(videoId);
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        return breakdownResponse(videoId, "DEVICE_TYPE", range,
+                analyticsClient.getDevices(videoId, range.startDate(), range.endDate()));
+    }
+
+    public ApiModels.BreakdownResponse channelOperatingSystems(LocalDate startDate,
+                                                               LocalDate endDate,
+                                                               int limit) {
+        validateBreakdownLimit(limit);
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        return breakdownResponse(null, "OPERATING_SYSTEM", range,
+                analyticsClient.getOperatingSystems(null, range.startDate(), range.endDate(), limit));
+    }
+
+    public ApiModels.DemographicsResponse channelDemographics(LocalDate startDate, LocalDate endDate) {
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        List<ApiModels.DemographicItem> items = analyticsClient
+                .getDemographics(range.startDate(), range.endDate())
+                .stream()
+                .map(item -> new ApiModels.DemographicItem(
+                        item.ageGroup(),
+                        item.gender(),
+                        item.viewerPercentage()
+                ))
+                .toList();
+        return new ApiModels.DemographicsResponse(reportPeriod(range), items);
+    }
+
+    public ApiModels.RetentionResponse retention(String videoId,
+                                                 LocalDate startDate,
+                                                 LocalDate endDate) {
+        requireOwnedVideo(videoId);
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        List<ApiModels.RetentionPoint> points = analyticsClient
+                .getRetention(videoId, range.startDate(), range.endDate())
+                .stream()
+                .map(point -> new ApiModels.RetentionPoint(
+                        point.elapsedVideoTimeRatio(),
+                        point.elapsedVideoTimeRatio() * 100,
+                        point.audienceWatchRatio(),
+                        point.audienceWatchRatio() * 100,
+                        point.relativeRetentionPerformance()
+                ))
+                .toList();
+        return new ApiModels.RetentionResponse(videoId, reportPeriod(range), points);
+    }
+
+    public ApiModels.TrafficSourceDetailsResponse trafficSourceDetails(String videoId,
+                                                                       String sourceType,
+                                                                       LocalDate startDate,
+                                                                       LocalDate endDate,
+                                                                       int limit) {
+        requireOwnedVideo(videoId);
+        validateBreakdownLimit(limit);
+        if (sourceType == null || sourceType.isBlank()) {
+            throw new IllegalArgumentException("sourceType è obbligatorio");
+        }
+        String normalizedSourceType = sourceType.trim().toUpperCase(Locale.ROOT);
+        if (!normalizedSourceType.matches("[A-Z0-9_]+")) {
+            throw new IllegalArgumentException("sourceType contiene caratteri non validi");
+        }
+        DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
+        List<ApiModels.TrafficSourceDetailItem> items = analyticsClient
+                .getTrafficSourceDetails(
+                        videoId,
+                        normalizedSourceType,
+                        range.startDate(),
+                        range.endDate(),
+                        limit
+                )
+                .stream()
+                .map(item -> new ApiModels.TrafficSourceDetailItem(
+                        item.detail(),
+                        item.views(),
+                        item.estimatedMinutesWatched(),
+                        item.estimatedMinutesWatched() / 60.0
+                ))
+                .toList();
+        return new ApiModels.TrafficSourceDetailsResponse(
+                videoId,
+                normalizedSourceType,
+                reportPeriod(range),
+                items
+        );
+    }
+
+    private ApiModels.BreakdownResponse breakdownResponse(
+            String videoId,
+            String dimension,
+            DateRangeResolver.DateRange range,
+            List<YouTubeAnalyticsClient.BreakdownMetric> values) {
+        return new ApiModels.BreakdownResponse(
+                videoId,
+                dimension,
+                reportPeriod(range),
+                values.stream().map(mapper::breakdown).toList()
+        );
+    }
+
+    private void validateBreakdownLimit(int limit) {
+        if (limit < 1 || limit > 200) {
+            throw new IllegalArgumentException("limit deve essere compreso tra 1 e 200");
+        }
+    }
+
     private ApiModels.ContentTypeSummary summarizeType(
             ContentType type,
             List<YouTubeDataClient.VideoMetadata> videos,

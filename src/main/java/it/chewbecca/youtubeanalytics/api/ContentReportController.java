@@ -87,4 +87,42 @@ public class ContentReportController {
             @RequestParam(defaultValue = "25") int limit) {
         return reportService.countries(videoId, startDate, endDate, limit);
     }
+
+    @GetMapping("/{videoId}/retention")
+    @Operation(operationId = "getContentRetention", summary = "Curva di fidelizzazione del pubblico")
+    public ApiModels.RetentionResponse retention(
+            @PathVariable String videoId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.retention(videoId, startDate, endDate);
+    }
+
+    @GetMapping("/{videoId}/subscription-status")
+    @Operation(operationId = "getContentSubscriptionStatus", summary = "Confronta spettatori iscritti e non iscritti")
+    public ApiModels.BreakdownResponse subscriptionStatus(
+            @PathVariable String videoId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.contentSubscriptionStatus(videoId, startDate, endDate);
+    }
+
+    @GetMapping("/{videoId}/devices")
+    @Operation(operationId = "getContentDevices", summary = "Distribuzione delle visualizzazioni per dispositivo")
+    public ApiModels.BreakdownResponse devices(
+            @PathVariable String videoId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return reportService.contentDevices(videoId, startDate, endDate);
+    }
+
+    @GetMapping("/{videoId}/traffic-source-details")
+    @Operation(operationId = "getContentTrafficSourceDetails", summary = "Dettagli di una sorgente di traffico")
+    public ApiModels.TrafficSourceDetailsResponse trafficSourceDetails(
+            @PathVariable String videoId,
+            @RequestParam String sourceType,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "25") int limit) {
+        return reportService.trafficSourceDetails(videoId, sourceType, startDate, endDate, limit);
+    }
 }

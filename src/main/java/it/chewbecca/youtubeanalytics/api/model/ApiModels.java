@@ -154,4 +154,49 @@ public final class ApiModels {
             List<BreakdownItem> items
     ) {
     }
+
+    public record DemographicItem(
+            String ageGroup,
+            String gender,
+            double viewerPercentage
+    ) {
+    }
+
+    public record DemographicsResponse(
+            ReportPeriod period,
+            List<DemographicItem> items
+    ) {
+    }
+
+    public record RetentionPoint(
+            double elapsedVideoTimeRatio,
+            double elapsedVideoPercentage,
+            double audienceWatchRatio,
+            double audienceWatchPercentage,
+            double relativeRetentionPerformance
+    ) {
+    }
+
+    public record RetentionResponse(
+            String videoId,
+            ReportPeriod period,
+            List<RetentionPoint> points
+    ) {
+    }
+
+    public record TrafficSourceDetailItem(
+            String detail,
+            long views,
+            double estimatedMinutesWatched,
+            double estimatedHoursWatched
+    ) {
+    }
+
+    public record TrafficSourceDetailsResponse(
+            String videoId,
+            String sourceType,
+            ReportPeriod period,
+            List<TrafficSourceDetailItem> items
+    ) {
+    }
 }
