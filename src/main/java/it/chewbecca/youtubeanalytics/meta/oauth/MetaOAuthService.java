@@ -1,10 +1,13 @@
 package it.chewbecca.youtubeanalytics.meta.oauth;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import it.chewbecca.youtubeanalytics.meta.client.MetaGraphApiException;
 import it.chewbecca.youtubeanalytics.meta.client.MetaGraphClient;
 import it.chewbecca.youtubeanalytics.meta.config.MetaProperties;
 import it.chewbecca.youtubeanalytics.oauth.CredentialCryptoService;
 import it.chewbecca.youtubeanalytics.oauth.OAuthStateStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +22,8 @@ import java.util.Map;
 
 @Service
 public class MetaOAuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(MetaOAuthService.class);
 
     private final MetaProperties properties;
     private final OAuthStateStore stateStore;
@@ -76,13 +81,7 @@ public class MetaOAuthService {
                 Map.of("fields", "id,name"),
                 "lettura business collegato"
         );
-        List<JsonNode> pages = graphClient.getAll(
-                "/me/accounts",
-                tokens.accessToken(),
-                Map.of("fields", "id,name,access_token,tasks,instagram_business_account{id,username,name}"),
-                100,
-                "elenco Pagine autorizzate"
-        );
+        List<JsonNode> pages = loadAuthorizedPages(tokens.accessToken());
         SelectedAssets selected = selectAssets(pages);
         Instant expiresAt = debug.expiresAt() != null ? debug.expiresAt() : tokens.fallbackExpiresAt(properties);
         String scopes = debug.scopes() == null ? null : String.join(" ", debug.scopes());
@@ -157,6 +156,38 @@ public class MetaOAuthService {
                         null, null, null, null, null, null,
                         null, null, null, false
                 ));
+    }
+
+
+    private List<JsonNode> loadAuthorizedPages(String accessToken) {
+        try {
+            List<JsonNode> pages = graphClient.getAll(
+                    "/me/accounts",
+                    accessToken,
+                    Map.of("fields", "id,name,access_token,tasks,instagram_business_account{id,username,name}"),
+                    100,
+                    "elenco Pagine autorizzate"
+            );
+            if (!pages.isEmpty()) {
+                return pages;
+            }
+        } catch (MetaGraphApiException ex) {
+            // I Business Integration System User token non espongono sempre /me/accounts
+            // nello stesso modo dei normali User Access Token. Proviamo l'espansione
+            // dell'edge accounts direttamente sul nodo /me.
+            log.info("/me/accounts non disponibile per il token Meta ricevuto; provo /me?fields=accounts: {}",
+                    ex.getMessage());
+        }
+
+        JsonNode me = graphClient.get(
+                "/me",
+                accessToken,
+                Map.of("fields", "accounts.limit(100){id,name,tasks,instagram_business_account{id,username,name}}"),
+                "elenco risorse Pagine autorizzate"
+        );
+        List<JsonNode> pages = new ArrayList<>();
+        me.path("accounts").path("data").forEach(pages::add);
+        return List.copyOf(pages);
     }
 
     private SelectedAssets selectAssets(List<JsonNode> pages) {

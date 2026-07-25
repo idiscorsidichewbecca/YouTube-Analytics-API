@@ -39,7 +39,7 @@ public class MetaTokenClient {
                 .encode()
                 .toUri();
 
-        TokenResponse response = restClient.get()
+        JsonNode root = restClient.get()
                 .uri(uri)
                 .retrieve()
                 .onStatus(status -> status.isError(), (request, httpResponse) -> {
@@ -53,11 +53,32 @@ public class MetaTokenClient {
                             "Meta non ha accettato l'authorization code"
                     );
                 })
-                .body(TokenResponse.class);
-        if (response == null || !StringUtils.hasText(response.accessToken())) {
-            throw new IllegalStateException("Meta OAuth non ha restituito un access token valido");
+                .body(JsonNode.class);
+
+        // Facebook Login for Business con System User token può restituire il token
+        // direttamente alla radice oppure dentro l'oggetto "data". Supportiamo entrambi
+        // i formati per non dipendere dalla variante di login configurata su Meta.
+        JsonNode tokenNode = root != null && root.path("data").isObject()
+                ? root.path("data")
+                : root;
+        String accessToken = tokenNode == null ? null : tokenNode.path("access_token").asText(null);
+        String tokenType = tokenNode == null ? null : tokenNode.path("token_type").asText(null);
+        Long expiresIn = tokenNode != null && tokenNode.path("expires_in").canConvertToLong()
+                ? tokenNode.path("expires_in").asLong()
+                : null;
+
+        if (!StringUtils.hasText(accessToken)) {
+            String body = root == null ? "null" : root.toString();
+            throw new MetaGraphApiException(
+                    200,
+                    null,
+                    null,
+                    "oauth/access_token",
+                    body,
+                    "Meta OAuth ha restituito una risposta senza access token"
+            );
         }
-        return response;
+        return new TokenResponse(accessToken, tokenType, expiresIn);
     }
 
     public DebugToken debug(String inputToken) {
