@@ -15,7 +15,7 @@
     <artifactId>youtube-analytics-api</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>chewbecca-youtube-analytics-api</name>
-    <description>API YouTube Analytics per I Discorsi di Chewbecca e GPT Actions</description>
+    <description>API social analytics YouTube, Facebook e Instagram per I Discorsi di Chewbecca e GPT Actions</description>
 
     <properties>
         <java.version>21</java.version>

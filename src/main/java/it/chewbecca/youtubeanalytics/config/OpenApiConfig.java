@@ -16,9 +16,9 @@ public class OpenApiConfig {
         String schemeName = "bearerApiKey";
         return new OpenAPI()
                 .info(new Info()
-                        .title("I Discorsi di Chewbecca - YouTube Analytics API")
-                        .version("1.0.0")
-                        .description("API private per interrogare YouTube Data API e YouTube Analytics tramite GPT Actions."))
+                        .title("I Discorsi di Chewbecca - Social Analytics API")
+                        .version("2.0.0")
+                        .description("API private per interrogare YouTube, Facebook e Instagram tramite GPT Actions."))
                 .components(new Components().addSecuritySchemes(
                         schemeName,
                         new SecurityScheme()

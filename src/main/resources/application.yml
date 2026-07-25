@@ -57,6 +57,20 @@ app:
     token-encryption-key: ${TOKEN_ENCRYPTION_KEY}
     fail-on-default-secrets: true
 
+  meta:
+    enabled: ${META_ENABLED:false}
+    app-id: ${META_APP_ID:}
+    app-secret: ${META_APP_SECRET:}
+    configuration-id: ${META_CONFIG_ID:1046575924525879}
+    redirect-uri: ${META_REDIRECT_URI:http://localhost:8080/oauth2/meta/callback}
+    graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
+    expected-page-id: ${META_EXPECTED_PAGE_ID:}
+    expected-instagram-account-id: ${META_EXPECTED_INSTAGRAM_ACCOUNT_ID:}
+    default-report-days: 28
+    max-insight-range-days: 90
+    max-content-items: 500
+    token-expiry-fallback-days: 60
+
   youtube:
     default-report-days: 28
     shorts-duration-fallback-seconds: 180

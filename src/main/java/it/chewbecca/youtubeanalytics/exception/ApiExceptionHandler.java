@@ -1,6 +1,9 @@
 package it.chewbecca.youtubeanalytics.exception;
 
 import it.chewbecca.youtubeanalytics.client.GoogleApiException;
+import it.chewbecca.youtubeanalytics.meta.client.MetaGraphApiException;
+import it.chewbecca.youtubeanalytics.meta.exception.MetaNotConnectedException;
+import it.chewbecca.youtubeanalytics.meta.exception.MetaTokenExpiredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -22,6 +25,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
+    @ExceptionHandler({MetaNotConnectedException.class, MetaTokenExpiredException.class})
+    ResponseEntity<ApiError> metaUnavailable(RuntimeException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     ResponseEntity<ApiError> notFound(ResourceNotFoundException ex) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -35,6 +43,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(GoogleApiException.class)
     ResponseEntity<ApiError> googleApi(GoogleApiException ex) {
         log.error("Google API error status={} body={}", ex.getStatusCode(), ex.getResponseBody());
+        return error(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(MetaGraphApiException.class)
+    ResponseEntity<ApiError> metaApi(MetaGraphApiException ex) {
+        log.error("Meta Graph API error operation={} status={} code={} subcode={} body={}",
+                ex.getOperation(), ex.getStatusCode(), ex.getGraphCode(), ex.getGraphSubcode(), ex.getResponseBody());
         return error(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 

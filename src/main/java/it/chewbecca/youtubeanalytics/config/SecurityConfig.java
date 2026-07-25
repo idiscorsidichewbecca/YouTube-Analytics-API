@@ -39,6 +39,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/oauth2/google/callback",
+                                "/oauth2/meta/callback",
                                 "/actuator/health/**",
                                 "/privacy-policy.html",
                                 "/openapi-gpt.yaml",

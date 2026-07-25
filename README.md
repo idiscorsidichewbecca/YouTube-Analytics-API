@@ -1,107 +1,51 @@
-# Chewbecca YouTube Analytics API
+# Chewbecca Social Analytics API
 
-Applicazione Spring Boot che espone API private per analizzare il canale **I Discorsi di Chewbecca** e collegarle a un GPT tramite **Azioni**.
+Applicazione Spring Boot privata per analizzare **I Discorsi di Chewbecca** su:
 
-L'applicazione usa due livelli di autenticazione distinti:
+- YouTube e YouTube Analytics;
+- Facebook Pages;
+- Instagram Professional, inclusi post, caroselli, video, Reel e storie attive.
 
-1. **Google OAuth2**: il proprietario autorizza una sola volta l'accesso al proprio canale YouTube.
-2. **Bearer API key**: il GPT usa una chiave privata per chiamare le API dell'applicazione, senza ricevere né conoscere i token Google.
+L'integrazione Meta è stata aggiunta senza sostituire o rinominare gli endpoint YouTube esistenti. Le API sono separate per prefisso:
 
-## Funzionalità
+```text
+/api/v1/channel/**             YouTube: canale
+/api/v1/content/**             YouTube: video e Short
+/api/v1/meta/facebook/**       Facebook
+/api/v1/meta/instagram/**      Instagram
+/api/v1/meta/overview          Facebook + Instagram
+```
 
-- Riepilogo del canale:
-  - iscritti attuali;
-  - visualizzazioni lifetime;
-  - numero di video pubblicati;
-  - visualizzazioni, engaged views, like, commenti e condivisioni nel periodo;
-  - tempo di visualizzazione;
-  - durata media e percentuale media vista;
-  - iscritti guadagnati, persi e netti.
-- Elenco completo di video e Short con:
-  - titolo, data, durata, URL e miniatura;
-  - visualizzazioni, like e commenti lifetime;
-  - metriche Analytics del periodo;
-  - ricerca per titolo o video ID;
-  - ordinamento e paginazione.
-- Confronto aggregato tra video tradizionali e Short.
-- Dettaglio di un singolo contenuto.
-- Andamento giornaliero o mensile del canale e del singolo contenuto.
-- Sorgenti di traffico e principali Paesi per contenuto.
-- OpenAPI dedicato alle Azioni dei GPT.
-- H2 locale e PostgreSQL per produzione.
-- Migrazioni database con Flyway.
-- Token OAuth cifrati con AES-256-GCM.
+## Sicurezza
+
+L'applicazione usa tre livelli distinti:
+
+1. **Google OAuth 2.0**, per collegare il canale YouTube.
+2. **Facebook Login for Business**, per collegare la Pagina Facebook e l'account Instagram professionale.
+3. **Bearer API key**, usata dal GPT per chiamare `/api/v1/**` senza conoscere i token dei provider.
+
+Gli endpoint amministrativi `/admin/**` richiedono HTTP Basic. I token Google e Meta sono persistiti nel database e cifrati con AES-256-GCM.
 
 ## Requisiti
 
 - Java 21
-- Maven 3.6.3 o successivo, oppure `./mvnw`
-- Un progetto Google Cloud con:
-  - **YouTube Data API v3** abilitata;
-  - **YouTube Analytics API** abilitata;
-  - OAuth consent screen configurata;
-  - client OAuth2 di tipo **Web application**.
+- Maven 3.6.3+ oppure `./mvnw`
+- Google Cloud con YouTube Data API v3 e YouTube Analytics API
+- Meta App con Facebook Login for Business e account Instagram professionale collegato alla Pagina
+- PostgreSQL in produzione; H2 è disponibile per lo sviluppo locale
 
-## 1. Configurazione Google Cloud
+## Configurazione locale
 
-Nel progetto Google Cloud in cui hai creato il client OAuth2:
-
-1. Abilita **YouTube Data API v3**.
-2. Abilita **YouTube Analytics API**.
-3. Nella schermata consenso OAuth, se l'app è in modalità `Testing`, aggiungi il tuo account Google tra i test user.
-   In modalità `Testing`, per le app esterne il refresh token può scadere dopo 7 giorni: per un deploy stabile porta l'app in stato di produzione oppure prevedi di ripetere il collegamento.
-4. Nel client OAuth2 aggiungi questo redirect URI locale:
-
-```text
-http://localhost:8080/oauth2/google/callback
-```
-
-Quando l'app sarà pubblicata, aggiungi anche il redirect URI HTTPS di produzione, ad esempio:
-
-```text
-https://youtube-api.tuodominio.it/oauth2/google/callback
-```
-
-Gli scope richiesti sono:
-
-```text
-https://www.googleapis.com/auth/youtube.readonly
-https://www.googleapis.com/auth/yt-analytics.readonly
-```
-
-## 2. Configurazione locale
-
-Copia il file di esempio:
+Crea il file delle variabili:
 
 ```bash
 cp .env.example .env
-```
-
-Genera le chiavi:
-
-```bash
 ./scripts/generate-secrets.sh
 ```
 
-Inserisci in `.env`:
+Riporta nel file `.env` i valori prodotti dallo script e configura Google e Meta.
 
-```dotenv
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:8080/oauth2/google/callback
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=...
-GPT_ACTION_API_KEY=...
-TOKEN_ENCRYPTION_KEY=...
-```
-
-Se il tuo account Google gestisce più canali o Brand Account, imposta anche:
-
-```dotenv
-YOUTUBE_EXPECTED_CHANNEL_ID=UCxxxxxxxxxxxxxxxxxxxxxx
-```
-
-Carica le variabili su macOS/Linux:
+Caricamento su macOS/Linux:
 
 ```bash
 set -a
@@ -109,16 +53,10 @@ source .env
 set +a
 ```
 
-## 3. Avvio
+Avvio:
 
 ```bash
 ./mvnw spring-boot:run
-```
-
-Oppure, con Maven già installato:
-
-```bash
-mvn spring-boot:run
 ```
 
 Swagger UI:
@@ -133,229 +71,301 @@ Health check:
 http://localhost:8080/actuator/health
 ```
 
-## 4. Collegamento del tuo canale YouTube
+## Configurazione Google / YouTube
 
-Apri nel browser:
+Nel client OAuth Google registra:
 
 ```text
-http://localhost:8080/admin/youtube/connect
+http://localhost:8080/oauth2/google/callback
 ```
 
-Il browser chiederà le credenziali Basic definite da `ADMIN_USERNAME` e `ADMIN_PASSWORD`, poi verrà aperta la schermata Google OAuth.
+In produzione aggiungi anche il callback HTTPS, per esempio:
 
-Autorizza l'account proprietario del canale **I Discorsi di Chewbecca**.
+```text
+https://api.tuodominio.it/oauth2/google/callback
+```
 
-Verifica lo stato:
+Variabili richieste:
+
+```dotenv
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://api.tuodominio.it/oauth2/google/callback
+YOUTUBE_EXPECTED_CHANNEL_ID=UC...
+```
+
+Collegamento:
+
+```text
+GET /admin/youtube/connect
+```
+
+Stato e disconnessione:
+
+```text
+GET    /admin/youtube/status
+DELETE /admin/youtube/disconnect
+```
+
+## Configurazione Meta / Facebook e Instagram
+
+La Meta App deve usare la configurazione **Facebook Login for Business** con:
+
+```text
+Configuration ID: 1046575924525879
+Token: System User Access Token, scadenza 60 giorni
+Risorse richieste: Pagine, Account Instagram
+```
+
+Permessi configurati:
+
+```text
+business_management
+instagram_basic
+instagram_manage_insights
+pages_read_engagement
+pages_show_list
+read_insights
+```
+
+Nel pannello Meta registra il callback esatto:
+
+```text
+http://localhost:8080/oauth2/meta/callback
+```
+
+In produzione:
+
+```text
+https://api.tuodominio.it/oauth2/meta/callback
+```
+
+Variabili richieste:
+
+```dotenv
+META_ENABLED=true
+META_APP_ID=...
+META_APP_SECRET=...
+META_CONFIG_ID=1046575924525879
+META_REDIRECT_URI=https://api.tuodominio.it/oauth2/meta/callback
+META_GRAPH_API_VERSION=v25.0
+```
+
+Quando il portfolio contiene più coppie Pagina/Instagram, imposta almeno uno dei seguenti valori per evitare selezioni ambigue:
+
+```dotenv
+META_EXPECTED_PAGE_ID=...
+META_EXPECTED_INSTAGRAM_ACCOUNT_ID=...
+```
+
+Collegamento:
+
+```text
+GET /admin/meta/connect
+```
+
+Il browser apre Facebook Login for Business; dopo l'autorizzazione il backend salva:
+
+- System User Access Token cifrato;
+- Page Access Token cifrato;
+- ID e nome della Pagina;
+- ID e username dell'account Instagram;
+- autorizzazioni e scadenza del token.
+
+Stato:
 
 ```bash
 curl -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" \
-  http://localhost:8080/admin/youtube/status
+  https://api.tuodominio.it/admin/meta/status
 ```
 
-Per scollegare il canale:
+Disconnessione:
 
 ```bash
 curl -X DELETE \
   -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" \
-  http://localhost:8080/admin/youtube/disconnect
+  https://api.tuodominio.it/admin/meta/disconnect
 ```
 
-## 5. Test delle API
+Il token Meta configurato scade dopo 60 giorni. Questa versione rileva la scadenza e restituisce un errore esplicito; prima della scadenza va ripetuto `/admin/meta/connect`. Non è implementato un rinnovo automatico non documentato.
 
-Riepilogo ultimi 28 giorni completi:
+`META_ENABLED=false` mantiene intatto il rilascio YouTube: l'app parte normalmente e gli endpoint Meta segnalano che l'integrazione è disabilitata.
 
-```bash
-curl -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  http://localhost:8080/api/v1/channel/summary
+## Endpoint Facebook
+
+Tutti gli endpoint richiedono:
+
+```http
+Authorization: Bearer <GPT_ACTION_API_KEY>
 ```
 
-Riepilogo di un periodo preciso:
+| Metodo | Endpoint | Descrizione |
+|---|---|---|
+| GET | `/api/v1/meta/facebook/page` | Metadati della Pagina collegata |
+| GET | `/api/v1/meta/facebook/summary` | Riepilogo del periodo |
+| GET | `/api/v1/meta/facebook/trend` | Serie giornaliera delle metriche |
+| GET | `/api/v1/meta/facebook/insights` | Insight generici con elenco metriche personalizzato |
+| GET | `/api/v1/meta/facebook/posts` | Post filtrabili, ordinabili e paginati |
+| GET | `/api/v1/meta/facebook/posts/{postId}` | Dettaglio post |
+| GET | `/api/v1/meta/facebook/posts/{postId}/insights` | Insight lifetime del post |
+| GET | `/api/v1/meta/facebook/videos` | Video Facebook |
+| GET | `/api/v1/meta/facebook/reels` | Reel Facebook |
+| GET | `/api/v1/meta/facebook/videos/{videoId}` | Dettaglio video |
+| GET | `/api/v1/meta/facebook/videos/{videoId}/insights` | Insight lifetime del video |
+| GET | `/api/v1/meta/facebook/top-content` | Classifica contenuti |
+
+Esempi:
 
 ```bash
-curl -G \
-  -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  --data-urlencode "startDate=2026-06-01" \
-  --data-urlencode "endDate=2026-06-30" \
-  http://localhost:8080/api/v1/channel/summary
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "startDate=2026-07-01" \
+  --data-urlencode "endDate=2026-07-25" \
+  https://api.tuodominio.it/api/v1/meta/facebook/summary
 ```
 
-Short ordinati per visualizzazioni:
+```bash
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "type=REEL" \
+  --data-urlencode "sortBy=REACH" \
+  --data-urlencode "limit=10" \
+  https://api.tuodominio.it/api/v1/meta/facebook/top-content
+```
+
+Con Graph API v25 la lettura diretta dell'edge Page Videos non è disponibile: gli endpoint video/Reel vengono quindi costruiti dai post pubblicati e dai relativi allegati. La classificazione dei Reel usa permalink e metadati disponibili e può essere euristica. Le risposte contengono `warnings` quando una metrica o una classificazione non è disponibile in modo univoco.
+
+## Endpoint Instagram
+
+| Metodo | Endpoint | Descrizione |
+|---|---|---|
+| GET | `/api/v1/meta/instagram/account` | Profilo e contatori dell'account |
+| GET | `/api/v1/meta/instagram/summary` | Riepilogo del periodo |
+| GET | `/api/v1/meta/instagram/trend` | Serie giornaliera delle metriche |
+| GET | `/api/v1/meta/instagram/insights` | Insight generici, inclusi breakdown e metric type |
+| GET | `/api/v1/meta/instagram/media` | Tutti i contenuti filtrabili e paginati |
+| GET | `/api/v1/meta/instagram/reels` | Solo Reel |
+| GET | `/api/v1/meta/instagram/stories` | Storie ancora attive |
+| GET | `/api/v1/meta/instagram/media/{mediaId}` | Dettaglio contenuto |
+| GET | `/api/v1/meta/instagram/media/{mediaId}/insights` | Insight lifetime del contenuto |
+| GET | `/api/v1/meta/instagram/top-content` | Classifica contenuti |
+
+Esempi:
 
 ```bash
-curl -G \
-  -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  --data-urlencode "type=SHORT" \
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "startDate=2026-07-01" \
+  --data-urlencode "endDate=2026-07-25" \
+  https://api.tuodominio.it/api/v1/meta/instagram/summary
+```
+
+```bash
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
   --data-urlencode "sortBy=VIEWS" \
   --data-urlencode "order=DESC" \
-  --data-urlencode "size=50" \
-  http://localhost:8080/api/v1/content
+  --data-urlencode "includeInsights=true" \
+  --data-urlencode "size=25" \
+  https://api.tuodominio.it/api/v1/meta/instagram/reels
 ```
 
-Ricerca di un contenuto per titolo:
+Per interrogare metriche non comprese nei riepiloghi predefiniti:
 
 ```bash
-curl -G \
-  -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  --data-urlencode "query=Darth Vader" \
-  http://localhost:8080/api/v1/content
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "metrics=views,reach,accounts_engaged,total_interactions" \
+  --data-urlencode "metricType=total_value" \
+  https://api.tuodominio.it/api/v1/meta/instagram/insights
 ```
 
-Confronto aggregato video vs Short:
-
-```bash
-curl -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  http://localhost:8080/api/v1/content/summary
-```
-
-Dettaglio di un video:
-
-```bash
-curl -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
-  http://localhost:8080/api/v1/content/VIDEO_ID
-```
-
-## 6. Collegamento alle Azioni del GPT
-
-Il file da importare è:
+## Endpoint combinato Meta
 
 ```text
-openapi-gpt.yaml
+GET /api/v1/meta/overview
 ```
 
-Nel progetto trovi anche `gpt-action-instructions.txt`, da usare come base nelle istruzioni del GPT affinché scelga l'endpoint corretto e distingua sempre metriche lifetime e metriche del periodo.
+Restituisce nello stesso payload il riepilogo Facebook e quello Instagram per il medesimo intervallo.
 
-Prima del deploy aggiorna entrambe le copie del contratto OpenAPI con lo script incluso:
+## Parametri comuni Meta
 
-```bash
-./scripts/set-public-domain.sh https://youtube-api.tuodominio.it
-```
+- `startDate`, `endDate`: formato ISO `YYYY-MM-DD`; default ultimi 28 giorni completi.
+- `page`: indice da zero.
+- `size`: da 1 a 100.
+- `query`: ricerca testuale.
+- `includeInsights`: carica anche gli insight per ogni contenuto; è più costoso in termini di chiamate API.
+- `sortBy`: `PUBLISHED_AT`, `VIEWS`, `REACH`, `LIKES`, `COMMENTS`, `SHARES`, `SAVES`, `ENGAGEMENT`.
+- `order`: `ASC` o `DESC`.
+- `metrics`: lista separata da virgole, massimo 25 nomi validi.
 
-Lo script sostituisce `https://YOUR_PUBLIC_DOMAIN` sia nel file da importare sia nella copia esposta dall'applicazione.
+Gli endpoint generici effettuano una chiamata separata per metrica. Se Meta ha rimosso o non supporta una metrica, l'intera risposta non fallisce: la metrica viene riportata in `warnings`.
 
-Nel builder del GPT:
+## Endpoint YouTube esistenti
 
-1. Apri **Configura → Azioni → Crea nuova azione**.
-2. Incolla o importa `openapi-gpt.yaml`.
-3. In autenticazione scegli **API key**.
-4. Seleziona **Bearer**.
-5. Inserisci lo stesso valore configurato in `GPT_ACTION_API_KEY`.
-6. Come URL della privacy policy usa `https://TUO_DOMINIO/privacy-policy.html` se il GPT viene condiviso pubblicamente.
-7. Esegui i test delle azioni dal pannello Preview.
-
-Il GPT non deve usare il client ID o il client secret Google. Questi restano soltanto nel backend Spring Boot.
-
-## 7. Endpoint
+La struttura e i percorsi preesistenti sono invariati:
 
 | Metodo | Endpoint | Descrizione |
 |---|---|---|
 | GET | `/api/v1/channel/summary` | Riepilogo lifetime e periodo |
 | GET | `/api/v1/channel/trend` | Trend giornaliero o mensile |
-| GET | `/api/v1/content` | Video e Short paginati, filtrabili e ricercabili |
-| GET | `/api/v1/content/summary` | Confronto aggregato video vs Short |
-| GET | `/api/v1/content/{videoId}` | Dettaglio contenuto |
-| GET | `/api/v1/content/{videoId}/trend` | Trend del contenuto |
-| GET | `/api/v1/content/{videoId}/traffic-sources` | Sorgenti di traffico |
-| GET | `/api/v1/content/{videoId}/countries` | Principali Paesi |
-| GET | `/api/v1/channel/subscription-status` | Confronto spettatori iscritti/non iscritti |
+| GET | `/api/v1/channel/subscription-status` | Iscritti/non iscritti |
 | GET | `/api/v1/channel/devices` | Distribuzione per dispositivo |
-| GET | `/api/v1/channel/operating-systems` | Distribuzione per sistema operativo |
-| GET | `/api/v1/channel/demographics` | Distribuzione per età e genere |
-| GET | `/api/v1/content/{videoId}/retention` | Curva di fidelizzazione del pubblico |
-| GET | `/api/v1/content/{videoId}/subscription-status` | Iscritti/non iscritti per contenuto |
-| GET | `/api/v1/content/{videoId}/devices` | Dispositivi per contenuto |
-| GET | `/api/v1/content/{videoId}/traffic-source-details` | Dettaglio di una sorgente di traffico |
-| GET | `/admin/youtube/connect` | Avvia Google OAuth2 |
-| GET | `/admin/youtube/status` | Stato collegamento |
-| DELETE | `/admin/youtube/disconnect` | Rimuove token salvati |
+| GET | `/api/v1/channel/operating-systems` | Sistemi operativi |
+| GET | `/api/v1/channel/demographics` | Demografia |
+| GET | `/api/v1/content` | Video e Short filtrabili e paginati |
+| GET | `/api/v1/content/summary` | Confronto video/Short |
+| GET | `/api/v1/content/{videoId}` | Dettaglio contenuto |
+| GET | `/api/v1/content/{videoId}/trend` | Trend contenuto |
+| GET | `/api/v1/content/{videoId}/traffic-sources` | Sorgenti di traffico |
+| GET | `/api/v1/content/{videoId}/countries` | Paesi |
+| GET | `/api/v1/content/{videoId}/retention` | Retention |
 
-Date omesse: ultimi 28 giorni completi. Le date YouTube Analytics sono riferite al fuso `America/Los_Angeles`.
+## Database
 
-## 8. Riconoscimento degli Short
+Flyway esegue:
 
-La YouTube Data API non espone un attributo diretto e affidabile `isShort`. L'app usa questa strategia:
-
-1. override manuali;
-2. contenuti pubblicati prima dell'introduzione di Shorts classificati come video;
-3. hashtag `#short` o `#shorts`;
-4. durata massima configurabile, con confidenza `MEDIUM`;
-5. i contenuti oltre la durata massima sono classificati come video.
-
-Puoi correggere casi particolari in `application.yml`:
-
-```yaml
-app:
-  youtube:
-    forced-short-ids:
-      - VIDEO_ID_DA_FORZARE_COME_SHORT
-    forced-video-ids:
-      - VIDEO_ID_DA_FORZARE_COME_VIDEO
+```text
+V1__create_youtube_credentials.sql
+V2__create_meta_credentials.sql
 ```
 
-La risposta espone sempre:
+La nuova tabella `meta_credentials` è indipendente da `youtube_credentials`, quindi i collegamenti e le scadenze dei due provider restano separati.
 
-- `contentType`;
-- `contentTypeDetection`;
-- `classificationConfidence`.
+## GPT Actions
 
-Nell'endpoint delle sorgenti di traffico, il valore `SHORTS` segnala visualizzazioni provenienti dal feed Shorts.
+Il contratto da importare è:
 
-## 9. Database di produzione
+```text
+openapi-gpt.yaml
+```
 
-Avvia PostgreSQL locale:
+La stessa copia viene esposta da:
+
+```text
+/openapi-gpt.yaml
+```
+
+Imposta il dominio pubblico in entrambe le copie:
 
 ```bash
-docker compose up -d postgres
+./scripts/set-public-domain.sh https://api.tuodominio.it
 ```
 
-Esegui con profilo produzione:
+Nel GPT Builder scegli autenticazione **API key → Bearer** e usa `GPT_ACTION_API_KEY`.
 
-```bash
-export SPRING_PROFILES_ACTIVE=prod
-export DATABASE_URL=jdbc:postgresql://localhost:5432/chewbecca_youtube
-export DATABASE_USERNAME=chewbecca
-export DATABASE_PASSWORD=chewbecca
-./mvnw spring-boot:run
+Le istruzioni operative aggiornate sono in `gpt-action-instructions.txt` e obbligano il GPT a distinguere sempre la piattaforma e il tipo di metrica.
+
+## Rilascio su Render
+
+Mantieni tutte le variabili YouTube esistenti e aggiungi:
+
+```dotenv
+META_ENABLED=true
+META_APP_ID=...
+META_APP_SECRET=...
+META_CONFIG_ID=1046575924525879
+META_REDIRECT_URI=https://<servizio>.onrender.com/oauth2/meta/callback
+META_GRAPH_API_VERSION=v25.0
+META_EXPECTED_PAGE_ID=...
+META_EXPECTED_INSTAGRAM_ACCOUNT_ID=...
 ```
 
-In produzione il profilo `prod` blocca l'avvio se rileva le chiavi di sviluppo predefinite. Flyway crea e versiona automaticamente la tabella dei token OAuth; Hibernate è configurato in modalità `validate`.
+Nel pannello Meta, `META_REDIRECT_URI` deve coincidere carattere per carattere con l'URI OAuth valido registrato.
 
-## 10. Deploy
-
-L'app deve essere esposta su HTTPS affinché il GPT possa chiamarla. Puoi pubblicarla su AWS Lightsail, ECS, App Runner, Render, Railway o un VPS Docker.
-
-Build:
-
-```bash
-./mvnw clean package
-```
-
-Docker:
-
-```bash
-docker build -t chewbecca-youtube-analytics-api .
-docker run --rm -p 8080:8080 --env-file .env chewbecca-youtube-analytics-api
-```
-
-Dopo il deploy:
-
-1. aggiorna `GOOGLE_REDIRECT_URI` con il callback HTTPS;
-2. aggiungi lo stesso URI nel client OAuth Google;
-3. aggiorna il server in `openapi-gpt.yaml`;
-4. visita `/admin/youtube/connect` sul dominio pubblico;
-5. configura la API key nel GPT.
-
-## Note sui dati
-
-- Le statistiche `lifetime` arrivano dalla YouTube Data API.
-- Le metriche del periodo arrivano dalla YouTube Analytics API.
-- Il totale iscritti restituito dalla Data API può essere arrotondato anche per il proprietario del canale.
-- Dal 30 aprile 2025, per gli Short `views` conta avvii e replay; `engagedViews` mantiene la precedente logica basata sulla visione oltre i primi secondi.
-- Alcuni dati Analytics possono avere un ritardo di elaborazione; per questo il periodo predefinito termina ieri.
-
-## Riferimenti ufficiali
-
-- YouTube Analytics channel reports: https://developers.google.com/youtube/analytics/channel_reports
-- YouTube Analytics metrics: https://developers.google.com/youtube/analytics/metrics
-- YouTube Data API: https://developers.google.com/youtube/v3/docs
-- Google OAuth web-server flow: https://developers.google.com/identity/protocols/oauth2/web-server
-- Configurazione GPT Actions: https://help.openai.com/en/articles/9442513-configuring-actions-in-gpts
+Non inserire `META_APP_SECRET`, token Meta o chiavi di cifratura nel repository.
