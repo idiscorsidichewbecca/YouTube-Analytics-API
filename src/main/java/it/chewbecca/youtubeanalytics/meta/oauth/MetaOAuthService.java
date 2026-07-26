@@ -67,7 +67,9 @@ public class MetaOAuthService {
     @Transactional
     @CacheEvict(cacheNames = {"metaFacebookPage", "metaInstagramAccount", "metaFacebookContent", "metaInstagramMedia"}, allEntries = true)
     public MetaCredential connect(String code, String state) {
-        properties.requireConfigured();
+        String stage = "validazione configurazione e state";
+        try {
+            properties.requireConfigured();
         if (!stateStore.consume(state)) {
             throw new IllegalArgumentException("Parametro OAuth state Meta assente, scaduto o non valido");
         }
@@ -75,26 +77,31 @@ public class MetaOAuthService {
             throw new IllegalArgumentException("Meta non ha restituito un authorization code");
         }
 
-        log.info("Meta OAuth: scambio authorization code");
+        stage = "scambio authorization code";
+        log.warn("Meta OAuth stage={}", stage);
         MetaTokenClient.TokenResponse tokens = tokenClient.exchangeAuthorizationCode(code);
 
-        log.info("Meta OAuth: verifica token ricevuto");
+        stage = "verifica token ricevuto";
+        log.warn("Meta OAuth stage={}", stage);
         MetaTokenClient.DebugToken debug = tokenClient.debug(tokens.accessToken());
         if (StringUtils.hasText(debug.appId()) && !properties.appId().equals(debug.appId())) {
             throw new IllegalStateException("Il token Meta appartiene a un'app diversa da META_APP_ID");
         }
 
-        log.info("Meta OAuth: lettura identità collegata, token type={}", debug.type());
+        stage = "lettura identità collegata";
+        log.warn("Meta OAuth stage={}, token type={}", stage, debug.type());
         JsonNode business = graphClient.get(
                 "/me",
                 tokens.accessToken(),
                 Map.of("fields", "id,name"),
                 "lettura business collegato"
         );
+        stage = "recupero Pagine autorizzate";
         List<JsonNode> pages = loadAuthorizedPages(tokens.accessToken(), debug);
-        log.info("Meta OAuth: Pagine autorizzate recuperate={}", pages.size());
+        log.warn("Meta OAuth stage={} completato, pages={}", stage, pages.size());
+        stage = "selezione Pagina e account Instagram";
         SelectedAssets selected = selectAssets(pages, debug);
-        log.info("Meta OAuth: risorse selezionate pageId={}, instagramAccountId={}",
+        log.warn("Meta OAuth stage={} completato, pageId={}, instagramAccountId={}", stage,
                 selected.pageId(), selected.instagramAccountId());
         Instant expiresAt = debug.expiresAt() != null ? debug.expiresAt() : tokens.fallbackExpiresAt(properties);
         String scopes = debug.scopes() == null ? null : String.join(" ", debug.scopes());
@@ -102,6 +109,7 @@ public class MetaOAuthService {
                 ? selected.pageAccessToken()
                 : tokens.accessToken();
 
+        stage = "lettura credenziale Meta dal database";
         MetaCredential credential = repository.findById(MetaCredential.SINGLETON_ID).orElse(null);
         if (credential == null) {
             credential = MetaCredential.create(
@@ -132,7 +140,37 @@ public class MetaOAuthService {
                     selected.instagramUsername()
             );
         }
-        return repository.save(credential);
+        stage = "salvataggio credenziale Meta nel database";
+        MetaCredential saved = repository.saveAndFlush(credential);
+        log.warn("Meta OAuth stage={} completato", stage);
+        return saved;
+        } catch (RuntimeException ex) {
+            Throwable root = rootCause(ex);
+            log.error("Meta OAuth fallita stage={} exception={} rootException={} rootMessage={}",
+                    stage,
+                    ex.getClass().getName(),
+                    root.getClass().getName(),
+                    safeMessage(root),
+                    ex);
+            throw ex;
+        }
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private String safeMessage(Throwable throwable) {
+        String message = throwable == null ? null : throwable.getMessage();
+        if (!StringUtils.hasText(message)) {
+            return "nessun messaggio";
+        }
+        String singleLine = message.replace('\n', ' ').replace('\r', ' ');
+        return singleLine.length() <= 1200 ? singleLine : singleLine.substring(0, 1200) + "...";
     }
 
     @Transactional

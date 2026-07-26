@@ -59,6 +59,13 @@ public class MetaOAuthController {
         } catch (IllegalStateException ex) {
             log.error("Callback Meta fallita", ex);
             return html(500, "Collegamento Meta non riuscito", escape(ex.getMessage()));
+        } catch (Exception ex) {
+            Throwable root = rootCause(ex);
+            String detail = ex.getClass().getSimpleName()
+                    + " / " + root.getClass().getSimpleName()
+                    + ": " + safeMessage(root);
+            log.error("Callback Meta fallita con eccezione non gestita: {}", detail, ex);
+            return html(500, "Collegamento Meta non riuscito", escape(detail));
         }
     }
 
@@ -88,6 +95,23 @@ public class MetaOAuthController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .contentType(MediaType.TEXT_HTML)
                 .body(body);
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private String safeMessage(Throwable throwable) {
+        String message = throwable == null ? null : throwable.getMessage();
+        if (message == null || message.isBlank()) {
+            return "nessun messaggio";
+        }
+        String singleLine = message.replace('\n', ' ').replace('\r', ' ');
+        return singleLine.length() <= 1200 ? singleLine : singleLine.substring(0, 1200) + "...";
     }
 
     private String escape(String value) {
