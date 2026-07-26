@@ -14,7 +14,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class MetaTokenClient {
@@ -110,12 +112,30 @@ public class MetaTokenClient {
         }
         List<String> scopes = new ArrayList<>();
         data.path("scopes").forEach(scope -> scopes.add(scope.asText()));
+
+        Map<String, List<String>> granularScopes = new LinkedHashMap<>();
+        data.path("granular_scopes").forEach(granularScope -> {
+            String scope = granularScope.path("scope").asText(null);
+            if (!StringUtils.hasText(scope)) {
+                return;
+            }
+            List<String> targetIds = new ArrayList<>();
+            granularScope.path("target_ids").forEach(targetId -> {
+                String value = targetId.asText(null);
+                if (StringUtils.hasText(value)) {
+                    targetIds.add(value);
+                }
+            });
+            granularScopes.put(scope, List.copyOf(targetIds));
+        });
+
         long expiresAt = data.path("expires_at").asLong(0);
         return new DebugToken(
                 data.path("app_id").asText(null),
                 data.path("type").asText(null),
                 data.path("user_id").asText(null),
-                scopes,
+                List.copyOf(scopes),
+                Map.copyOf(granularScopes),
                 expiresAt > 0 ? Instant.ofEpochSecond(expiresAt) : null,
                 data.path("data_access_expires_at").asLong(0) > 0
                         ? Instant.ofEpochSecond(data.path("data_access_expires_at").asLong())
@@ -141,8 +161,12 @@ public class MetaTokenClient {
             String type,
             String userId,
             List<String> scopes,
+            Map<String, List<String>> granularScopes,
             Instant expiresAt,
             Instant dataAccessExpiresAt
     ) {
+        public List<String> targetIds(String scope) {
+            return granularScopes == null ? List.of() : granularScopes.getOrDefault(scope, List.of());
+        }
     }
 }

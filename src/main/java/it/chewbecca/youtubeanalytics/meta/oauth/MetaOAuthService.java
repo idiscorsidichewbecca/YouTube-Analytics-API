@@ -18,7 +18,9 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class MetaOAuthService {
@@ -73,16 +75,27 @@ public class MetaOAuthService {
             throw new IllegalArgumentException("Meta non ha restituito un authorization code");
         }
 
+        log.info("Meta OAuth: scambio authorization code");
         MetaTokenClient.TokenResponse tokens = tokenClient.exchangeAuthorizationCode(code);
+
+        log.info("Meta OAuth: verifica token ricevuto");
         MetaTokenClient.DebugToken debug = tokenClient.debug(tokens.accessToken());
+        if (StringUtils.hasText(debug.appId()) && !properties.appId().equals(debug.appId())) {
+            throw new IllegalStateException("Il token Meta appartiene a un'app diversa da META_APP_ID");
+        }
+
+        log.info("Meta OAuth: lettura identità collegata, token type={}", debug.type());
         JsonNode business = graphClient.get(
                 "/me",
                 tokens.accessToken(),
                 Map.of("fields", "id,name"),
                 "lettura business collegato"
         );
-        List<JsonNode> pages = loadAuthorizedPages(tokens.accessToken());
-        SelectedAssets selected = selectAssets(pages);
+        List<JsonNode> pages = loadAuthorizedPages(tokens.accessToken(), debug);
+        log.info("Meta OAuth: Pagine autorizzate recuperate={}", pages.size());
+        SelectedAssets selected = selectAssets(pages, debug);
+        log.info("Meta OAuth: risorse selezionate pageId={}, instagramAccountId={}",
+                selected.pageId(), selected.instagramAccountId());
         Instant expiresAt = debug.expiresAt() != null ? debug.expiresAt() : tokens.fallbackExpiresAt(properties);
         String scopes = debug.scopes() == null ? null : String.join(" ", debug.scopes());
         String pageToken = StringUtils.hasText(selected.pageAccessToken())
@@ -159,41 +172,83 @@ public class MetaOAuthService {
     }
 
 
-    private List<JsonNode> loadAuthorizedPages(String accessToken) {
+    private List<JsonNode> loadAuthorizedPages(String accessToken, MetaTokenClient.DebugToken debug) {
+        List<JsonNode> pages = new ArrayList<>();
+
         try {
-            List<JsonNode> pages = graphClient.getAll(
+            pages = graphClient.getAll(
                     "/me/accounts",
                     accessToken,
-                    Map.of("fields", "id,name,access_token,tasks,instagram_business_account{id,username,name}"),
+                    Map.of("fields", pageFields()),
                     100,
                     "elenco Pagine autorizzate"
             );
             if (!pages.isEmpty()) {
                 return pages;
             }
+            log.info("Meta OAuth: /me/accounts ha restituito zero Pagine");
         } catch (MetaGraphApiException ex) {
-            // I Business Integration System User token non espongono sempre /me/accounts
-            // nello stesso modo dei normali User Access Token. Proviamo l'espansione
-            // dell'edge accounts direttamente sul nodo /me.
-            log.info("/me/accounts non disponibile per il token Meta ricevuto; provo /me?fields=accounts: {}",
-                    ex.getMessage());
+            log.info("Meta OAuth: /me/accounts non disponibile: {}", ex.getMessage());
         }
 
-        JsonNode me = graphClient.get(
-                "/me",
-                accessToken,
-                Map.of("fields", "accounts.limit(100){id,name,tasks,instagram_business_account{id,username,name}}"),
-                "elenco risorse Pagine autorizzate"
-        );
-        List<JsonNode> pages = new ArrayList<>();
-        me.path("accounts").path("data").forEach(pages::add);
+        // Facebook Login for Business espone gli asset selezionati anche nei granular_scopes
+        // del debug token. In alcune configurazioni /me/accounts può risultare vuoto benché
+        // l'utente abbia scelto esplicitamente una Pagina durante l'onboarding.
+        Set<String> pageTargetIds = new LinkedHashSet<>();
+        pageTargetIds.addAll(debug.targetIds("pages_show_list"));
+        pageTargetIds.addAll(debug.targetIds("pages_read_engagement"));
+        pageTargetIds.addAll(debug.targetIds("read_insights"));
+
+        if (!pageTargetIds.isEmpty()) {
+            log.info("Meta OAuth: provo il recupero diretto di {} Page target IDs dai granular_scopes",
+                    pageTargetIds.size());
+            for (String pageId : pageTargetIds) {
+                try {
+                    JsonNode page = graphClient.get(
+                            "/" + pageId,
+                            accessToken,
+                            Map.of("fields", pageFields()),
+                            "lettura Pagina autorizzata " + pageId
+                    );
+                    if (page.hasNonNull("id")) {
+                        pages.add(page);
+                    }
+                } catch (MetaGraphApiException ex) {
+                    log.info("Meta OAuth: target {} non leggibile come Pagina: {}", pageId, ex.getMessage());
+                }
+            }
+            if (!pages.isEmpty()) {
+                return List.copyOf(pages);
+            }
+        }
+
+        try {
+            JsonNode me = graphClient.get(
+                    "/me",
+                    accessToken,
+                    Map.of("fields", "accounts.limit(100){" + pageFields() + "}"),
+                    "elenco risorse Pagine autorizzate"
+            );
+            me.path("accounts").path("data").forEach(pages::add);
+        } catch (MetaGraphApiException ex) {
+            log.info("Meta OAuth: espansione /me?fields=accounts non disponibile: {}", ex.getMessage());
+        }
         return List.copyOf(pages);
     }
 
-    private SelectedAssets selectAssets(List<JsonNode> pages) {
+    private String pageFields() {
+        return "id,name,access_token,tasks,"
+                + "instagram_business_account{id,username,name},"
+                + "connected_instagram_account{id,username,name}";
+    }
+
+    private SelectedAssets selectAssets(List<JsonNode> pages, MetaTokenClient.DebugToken debug) {
         List<SelectedAssets> candidates = new ArrayList<>();
         for (JsonNode page : pages) {
             JsonNode instagram = page.path("instagram_business_account");
+            if (instagram.isMissingNode() || instagram.isNull() || !instagram.hasNonNull("id")) {
+                instagram = page.path("connected_instagram_account");
+            }
             String pageId = textOrNull(page.path("id"));
             String instagramId = textOrNull(instagram.path("id"));
             if (pageId == null || instagramId == null) {
@@ -208,8 +263,14 @@ public class MetaOAuthService {
             ));
         }
         if (candidates.isEmpty()) {
+            List<String> pageTargets = debug == null ? List.of() : debug.targetIds("pages_show_list");
+            List<String> instagramTargets = debug == null ? List.of() : debug.targetIds("instagram_basic");
             throw new IllegalStateException(
-                    "Meta non ha restituito alcuna Pagina autorizzata con un account Instagram professionale collegato"
+                    "Meta non ha restituito alcuna Pagina autorizzata con un account Instagram professionale collegato. "
+                            + "Pagine lette=" + pages.size()
+                            + ", target Pagine=" + pageTargets
+                            + ", target Instagram=" + instagramTargets
+                            + ". Verifica che la Pagina e l'account Instagram siano collegati e selezionati nel login."
             );
         }
 

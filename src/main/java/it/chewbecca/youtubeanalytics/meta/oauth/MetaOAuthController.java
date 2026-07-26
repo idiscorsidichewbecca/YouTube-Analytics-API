@@ -1,5 +1,8 @@
 package it.chewbecca.youtubeanalytics.meta.oauth;
 
+import it.chewbecca.youtubeanalytics.meta.client.MetaGraphApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping
 public class MetaOAuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(MetaOAuthController.class);
 
     private final MetaOAuthService oauthService;
 
@@ -35,14 +40,26 @@ public class MetaOAuthController {
             String detail = errorDescription == null ? error : error + ": " + errorDescription;
             return html(400, "Autorizzazione Meta negata", "Errore restituito da Meta: " + escape(detail));
         }
-        MetaCredential credential = oauthService.connect(code, state);
-        return html(
-                200,
-                "Facebook e Instagram collegati",
-                "La Pagina <strong>" + escape(credential.getPageName()) + "</strong> e l'account Instagram "
-                        + "<strong>@" + escape(credential.getInstagramUsername()) + "</strong> sono stati collegati. "
-                        + "Puoi chiudere questa pagina."
-        );
+        try {
+            MetaCredential credential = oauthService.connect(code, state);
+            return html(
+                    200,
+                    "Facebook e Instagram collegati",
+                    "La Pagina <strong>" + escape(credential.getPageName()) + "</strong> e l'account Instagram "
+                            + "<strong>@" + escape(credential.getInstagramUsername()) + "</strong> sono stati collegati. "
+                            + "Puoi chiudere questa pagina."
+            );
+        } catch (MetaGraphApiException ex) {
+            log.error("Callback Meta fallita operation={} status={} code={} subcode={} body={}",
+                    ex.getOperation(), ex.getStatusCode(), ex.getGraphCode(), ex.getGraphSubcode(), ex.getResponseBody());
+            return html(502, "Collegamento Meta non riuscito", escape(ex.getMessage()));
+        } catch (IllegalArgumentException ex) {
+            log.warn("Callback Meta non valida: {}", ex.getMessage());
+            return html(400, "Collegamento Meta non valido", escape(ex.getMessage()));
+        } catch (IllegalStateException ex) {
+            log.error("Callback Meta fallita", ex);
+            return html(500, "Collegamento Meta non riuscito", escape(ex.getMessage()));
+        }
     }
 
     @GetMapping("/admin/meta/status")
