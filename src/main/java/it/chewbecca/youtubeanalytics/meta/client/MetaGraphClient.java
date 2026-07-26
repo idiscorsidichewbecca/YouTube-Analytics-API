@@ -99,7 +99,10 @@ public class MetaGraphClient {
     }
 
     private JsonNode executeGet(URI uri, String accessToken, String operation) {
-        JsonNode response = restClient.get()
+        // Alcuni endpoint Meta dichiarano il JSON come text/javascript. Leggiamo il
+        // corpo come byte e lo deserializziamo esplicitamente per non dipendere dal
+        // Content-Type scelto da Meta.
+        byte[] responseBytes = restClient.get()
                 .uri(uri)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
@@ -107,11 +110,26 @@ public class MetaGraphClient {
                     String body = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
                     throw toException(httpResponse.getStatusCode().value(), operation, body);
                 })
-                .body(JsonNode.class);
-        if (response == null) {
+                .body(byte[].class);
+
+        String responseBody = responseBytes == null
+                ? ""
+                : new String(responseBytes, StandardCharsets.UTF_8);
+        if (!StringUtils.hasText(responseBody)) {
             throw new IllegalStateException("Meta Graph API non ha restituito una risposta per " + operation);
         }
-        return response;
+        try {
+            return objectMapper.readTree(responseBody);
+        } catch (Exception ex) {
+            throw new MetaGraphApiException(
+                    200,
+                    null,
+                    null,
+                    operation,
+                    responseBody,
+                    "Meta Graph API ha restituito una risposta non JSON durante " + operation
+            );
+        }
     }
 
     private RuntimeException toException(int statusCode, String operation, String body) {

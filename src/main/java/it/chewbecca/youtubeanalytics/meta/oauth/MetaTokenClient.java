@@ -2,6 +2,7 @@ package it.chewbecca.youtubeanalytics.meta.oauth;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import it.chewbecca.youtubeanalytics.meta.client.MetaGraphApiException;
 import it.chewbecca.youtubeanalytics.meta.config.MetaProperties;
 import org.springframework.http.HttpHeaders;
@@ -22,10 +23,14 @@ import java.util.Map;
 public class MetaTokenClient {
 
     private final RestClient restClient;
+    private final ObjectMapper objectMapper;
     private final MetaProperties properties;
 
-    public MetaTokenClient(RestClient googleRestClient, MetaProperties properties) {
+    public MetaTokenClient(RestClient googleRestClient,
+                           ObjectMapper objectMapper,
+                           MetaProperties properties) {
         this.restClient = googleRestClient;
+        this.objectMapper = objectMapper;
         this.properties = properties;
     }
 
@@ -41,42 +46,25 @@ public class MetaTokenClient {
                 .encode()
                 .toUri();
 
-        JsonNode root = restClient.get()
-                .uri(uri)
-                .retrieve()
-                .onStatus(status -> status.isError(), (request, httpResponse) -> {
-                    String body = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
-                    throw new MetaGraphApiException(
-                            httpResponse.getStatusCode().value(),
-                            null,
-                            null,
-                            "oauth/access_token",
-                            body,
-                            "Meta non ha accettato l'authorization code"
-                    );
-                })
-                .body(JsonNode.class);
+        JsonNode root = executeJsonGet(uri, null, "oauth/access_token",
+                "Meta non ha accettato l'authorization code");
 
-        // Facebook Login for Business con System User token può restituire il token
-        // direttamente alla radice oppure dentro l'oggetto "data". Supportiamo entrambi
-        // i formati per non dipendere dalla variante di login configurata su Meta.
-        JsonNode tokenNode = root != null && root.path("data").isObject()
-                ? root.path("data")
-                : root;
-        String accessToken = tokenNode == null ? null : tokenNode.path("access_token").asText(null);
-        String tokenType = tokenNode == null ? null : tokenNode.path("token_type").asText(null);
-        Long expiresIn = tokenNode != null && tokenNode.path("expires_in").canConvertToLong()
+        // Facebook Login for Business può restituire il token direttamente alla
+        // radice oppure dentro l'oggetto "data", in base alla variante configurata.
+        JsonNode tokenNode = root.path("data").isObject() ? root.path("data") : root;
+        String accessToken = tokenNode.path("access_token").asText(null);
+        String tokenType = tokenNode.path("token_type").asText(null);
+        Long expiresIn = tokenNode.path("expires_in").canConvertToLong()
                 ? tokenNode.path("expires_in").asLong()
                 : null;
 
         if (!StringUtils.hasText(accessToken)) {
-            String body = root == null ? "null" : root.toString();
             throw new MetaGraphApiException(
                     200,
                     null,
                     null,
                     "oauth/access_token",
-                    body,
+                    root.toString(),
                     "Meta OAuth ha restituito una risposta senza access token"
             );
         }
@@ -90,24 +78,16 @@ public class MetaTokenClient {
                 .build()
                 .encode()
                 .toUri();
-        JsonNode root = restClient.get()
-                .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.appId() + "|" + properties.appSecret())
-                .retrieve()
-                .onStatus(status -> status.isError(), (request, httpResponse) -> {
-                    String body = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
-                    throw new MetaGraphApiException(
-                            httpResponse.getStatusCode().value(),
-                            null,
-                            null,
-                            "debug_token",
-                            body,
-                            "Impossibile verificare il token Meta"
-                    );
-                })
-                .body(JsonNode.class);
-        JsonNode data = root == null ? null : root.path("data");
-        if (data == null || data.isMissingNode() || !data.path("is_valid").asBoolean(false)) {
+
+        JsonNode root = executeJsonGet(
+                uri,
+                "Bearer " + properties.appId() + "|" + properties.appSecret(),
+                "debug_token",
+                "Impossibile verificare il token Meta"
+        );
+
+        JsonNode data = root.path("data");
+        if (data.isMissingNode() || !data.path("is_valid").asBoolean(false)) {
             throw new IllegalStateException("Meta ha restituito un token non valido");
         }
         List<String> scopes = new ArrayList<>();
@@ -141,6 +121,63 @@ public class MetaTokenClient {
                         ? Instant.ofEpochSecond(data.path("data_access_expires_at").asLong())
                         : null
         );
+    }
+
+    /**
+     * Meta può restituire JSON dichiarandolo come text/javascript. Leggere prima il
+     * corpo come byte evita di dipendere dall'HttpMessageConverter associato al
+     * Content-Type; il parsing JSON viene poi eseguito esplicitamente con Jackson.
+     */
+    private JsonNode executeJsonGet(URI uri,
+                                    String authorization,
+                                    String operation,
+                                    String errorMessage) {
+        RestClient.RequestHeadersSpec<?> request = restClient.get().uri(uri);
+        if (StringUtils.hasText(authorization)) {
+            request = request.header(HttpHeaders.AUTHORIZATION, authorization);
+        }
+
+        byte[] responseBytes = request
+                .retrieve()
+                .onStatus(status -> status.isError(), (httpRequest, httpResponse) -> {
+                    String body = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                    throw new MetaGraphApiException(
+                            httpResponse.getStatusCode().value(),
+                            null,
+                            null,
+                            operation,
+                            body,
+                            errorMessage
+                    );
+                })
+                .body(byte[].class);
+
+        String responseBody = responseBytes == null
+                ? ""
+                : new String(responseBytes, StandardCharsets.UTF_8);
+        if (!StringUtils.hasText(responseBody)) {
+            throw new MetaGraphApiException(
+                    200,
+                    null,
+                    null,
+                    operation,
+                    responseBody,
+                    "Meta ha restituito una risposta vuota durante " + operation
+            );
+        }
+
+        try {
+            return objectMapper.readTree(responseBody);
+        } catch (Exception ex) {
+            throw new MetaGraphApiException(
+                    200,
+                    null,
+                    null,
+                    operation,
+                    responseBody,
+                    "Meta ha restituito una risposta non JSON durante " + operation
+            );
+        }
     }
 
     public record TokenResponse(
