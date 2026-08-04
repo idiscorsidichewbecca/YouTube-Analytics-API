@@ -199,4 +199,87 @@ public final class ApiModels {
             List<TrafficSourceDetailItem> items
     ) {
     }
+
+    public record RevenueMetrics(
+            long views,
+            double estimatedRevenue,
+            double estimatedAdRevenue,
+            double estimatedPremiumRevenue,
+            double grossRevenue,
+            long monetizedPlaybacks,
+            long adImpressions,
+            double playbackBasedCpm,
+            double adImpressionCpm,
+            double estimatedRpm,
+            double monetizedPlaybackRatePercentage
+    ) {
+    }
+
+    public record RevenueSummaryResponse(
+            String channelId,
+            String channelTitle,
+            ReportPeriod period,
+            String currency,
+            RevenueMetrics metrics,
+            Instant generatedAt,
+            String note
+    ) {
+    }
+
+    public record RevenueContentItem(
+            String videoId,
+            String title,
+            ContentType contentType,
+            Instant publishedAt,
+            String youtubeUrl,
+            String thumbnailUrl,
+            RevenueMetrics metrics
+    ) {
+    }
+
+    public record RevenueContentListResponse(
+            ReportPeriod period,
+            String currency,
+            ContentType type,
+            String query,
+            int page,
+            int size,
+            long totalElements,
+            int totalPages,
+            RevenueSortBy sortBy,
+            SortOrder order,
+            RevenueMetrics totals,
+            List<RevenueContentItem> items
+    ) {
+    }
+
+    public record RevenueContentDetailResponse(
+            String videoId,
+            String title,
+            ContentType contentType,
+            Instant publishedAt,
+            String youtubeUrl,
+            String thumbnailUrl,
+            ReportPeriod period,
+            String currency,
+            RevenueMetrics metrics
+    ) {
+    }
+
+    public record RevenueTrendPointResponse(
+            String period,
+            RevenueMetrics metrics
+    ) {
+    }
+
+    public record RevenueTrendResponse(
+            String scope,
+            String videoId,
+            ReportPeriod reportPeriod,
+            TrendGranularity granularity,
+            String currency,
+            List<RevenueTrendPointResponse> points
+    ) {
+    }
+
 }

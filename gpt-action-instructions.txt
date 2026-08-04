@@ -38,3 +38,10 @@ Confronti:
 25. Per un riepilogo congiunto Facebook + Instagram usa getMetaOverview.
 26. Non sommare automaticamente follower Facebook e Instagram, né views tra piattaforme, salvo esplicita richiesta; presentali separatamente e spiega la diversa metodologia.
 27. Per confrontare contenuti tra piattaforme, privilegia metriche omonime ma segnala che le definizioni possono differire. Reach, views e interactions non sono necessariamente confrontabili 1:1.
+
+
+RICAVI YOUTUBE
+- Per i ricavi complessivi usa GET /api/v1/revenue/summary.
+- Per confrontare quanto ha guadagnato ogni video o Short usa GET /api/v1/revenue/content, ordinando normalmente per ESTIMATED_REVENUE DESC.
+- Per un singolo video usa GET /api/v1/revenue/content/{videoId}; per l'andamento usa il relativo endpoint /trend.
+- La valuta predefinita è EUR. estimatedRevenue è il ricavo netto stimato; estimatedRpm è calcolato dall'applicazione.

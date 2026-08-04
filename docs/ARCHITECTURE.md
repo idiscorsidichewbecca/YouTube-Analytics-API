@@ -6,9 +6,11 @@ GPT Action
    v
 Spring Boot API (/api/v1/**)
    |
-   +--> YouTube (/api/v1/channel, /api/v1/content)
+   +--> YouTube (/api/v1/channel, /api/v1/content, /api/v1/revenue)
    |      +--> YouTube Data API v3
    |      +--> YouTube Analytics API v2
+   |             +--> metriche di utilizzo
+   |             +--> ricavi stimati e monetizzazione
    |
    +--> Meta overview (/api/v1/meta/overview)
    |
@@ -44,6 +46,15 @@ L'integrazione Meta è additiva e non modifica i package o i mapping YouTube esi
 - cache separate;
 - controller e prefissi API distinti;
 - gestione esplicita delle rispettive scadenze.
+
+
+## Ricavi YouTube
+
+`RevenueReportController` espone riepilogo, classifica per contenuto, dettaglio e trend sotto `/api/v1/revenue/**`. `YoutubeRevenueService` combina i metadati del catalogo con le metriche monetarie restituite da `YouTubeAnalyticsClient`.
+
+Il flusso OAuth Google richiede lo scope aggiuntivo `yt-analytics-monetary.readonly`. I token creati prima di questa modifica devono essere sostituiti ricollegando il canale. Il campo amministrativo `monetaryAnalyticsGranted` consente di verificare che lo scope sia presente.
+
+Il report per contenuto recupera prima i 200 video con maggior ricavo, limite previsto dal report YouTube "Top videos", e completa gli eventuali contenuti mancanti con query puntuali. In questo modo anche un catalogo con più di 200 video restituisce una riga per ogni contenuto.
 
 ## Flusso Meta
 

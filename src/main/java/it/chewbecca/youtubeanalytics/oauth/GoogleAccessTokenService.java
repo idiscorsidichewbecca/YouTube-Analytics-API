@@ -1,5 +1,6 @@
 package it.chewbecca.youtubeanalytics.oauth;
 
+import it.chewbecca.youtubeanalytics.exception.YoutubeMonetaryScopeException;
 import it.chewbecca.youtubeanalytics.exception.YoutubeNotConnectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,6 +12,8 @@ import java.time.Instant;
 public class GoogleAccessTokenService {
 
     private static final Duration REFRESH_SKEW = Duration.ofMinutes(2);
+    private static final String MONETARY_ANALYTICS_SCOPE =
+            "https://www.googleapis.com/auth/yt-analytics-monetary.readonly";
 
     private final YoutubeCredentialRepository repository;
     private final CredentialCryptoService cryptoService;
@@ -51,4 +54,14 @@ public class GoogleAccessTokenService {
         return repository.findById(YoutubeCredential.SINGLETON_ID)
                 .orElseThrow(YoutubeNotConnectedException::new);
     }
+
+    @Transactional(readOnly = true)
+    public void requireMonetaryAnalyticsScope() {
+        YoutubeCredential credential = requireCredential();
+        String scopes = credential.getScopes();
+        if (scopes == null || !java.util.List.of(scopes.trim().split("\\s+")).contains(MONETARY_ANALYTICS_SCOPE)) {
+            throw new YoutubeMonetaryScopeException();
+        }
+    }
+
 }

@@ -11,6 +11,7 @@ L'integrazione Meta è stata aggiunta senza sostituire o rinominare gli endpoint
 ```text
 /api/v1/channel/**             YouTube: canale
 /api/v1/content/**             YouTube: video e Short
+/api/v1/revenue/**             YouTube: ricavi e monetizzazione
 /api/v1/meta/facebook/**       Facebook
 /api/v1/meta/instagram/**      Instagram
 /api/v1/meta/overview          Facebook + Instagram
@@ -94,11 +95,19 @@ GOOGLE_REDIRECT_URI=https://api.tuodominio.it/oauth2/google/callback
 YOUTUBE_EXPECTED_CHANNEL_ID=UC...
 ```
 
+Il collegamento Google richiede anche lo scope monetario:
+
+```text
+https://www.googleapis.com/auth/yt-analytics-monetary.readonly
+```
+
 Collegamento:
 
 ```text
 GET /admin/youtube/connect
 ```
+
+Dopo l'aggiornamento da una versione precedente, esegui una volta `DELETE /admin/youtube/disconnect` e poi riapri `GET /admin/youtube/connect`, altrimenti il token già salvato non potrà leggere i ricavi. `GET /admin/youtube/status` espone il campo `monetaryAnalyticsGranted` per verificarlo.
 
 Stato e disconnessione:
 
@@ -106,6 +115,39 @@ Stato e disconnessione:
 GET    /admin/youtube/status
 DELETE /admin/youtube/disconnect
 ```
+
+## Endpoint ricavi YouTube
+
+Tutti gli endpoint richiedono la stessa Bearer API key delle altre API `/api/v1/**`.
+
+| Metodo | Endpoint | Descrizione |
+|---|---|---|
+| GET | `/api/v1/revenue/summary` | Ricavi stimati complessivi del canale nel periodo |
+| GET | `/api/v1/revenue/trend` | Trend giornaliero o mensile dei ricavi del canale |
+| GET | `/api/v1/revenue/content` | Ricavi di ogni video e Short, filtrabili, ordinabili e paginati |
+| GET | `/api/v1/revenue/content/{videoId}` | Ricavi di un singolo contenuto |
+| GET | `/api/v1/revenue/content/{videoId}/trend` | Trend dei ricavi del singolo contenuto |
+
+La valuta predefinita è `EUR`; è possibile passare un altro codice ISO 4217 con `currency`, ad esempio `USD`.
+
+```bash
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "startDate=2026-07-01" \
+  --data-urlencode "endDate=2026-07-31" \
+  --data-urlencode "currency=EUR" \
+  https://api.tuodominio.it/api/v1/revenue/summary
+```
+
+```bash
+curl -G -H "Authorization: Bearer $GPT_ACTION_API_KEY" \
+  --data-urlencode "type=VIDEO" \
+  --data-urlencode "sortBy=ESTIMATED_REVENUE" \
+  --data-urlencode "order=DESC" \
+  --data-urlencode "size=25" \
+  https://api.tuodominio.it/api/v1/revenue/content
+```
+
+`estimatedRevenue` è il ricavo netto stimato più utile per capire quanto ha generato il canale o un video. I dati possono essere rettificati a fine mese e non rappresentano necessariamente il pagamento AdSense definitivo. `estimatedRpm` viene calcolato dall'applicazione come `estimatedRevenue / views * 1000`.
 
 ## Configurazione Meta / Facebook e Instagram
 

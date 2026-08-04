@@ -15,9 +15,12 @@ import java.util.List;
 public class YoutubeOAuthService {
 
     private static final String AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+    public static final String MONETARY_ANALYTICS_SCOPE =
+            "https://www.googleapis.com/auth/yt-analytics-monetary.readonly";
     private static final List<String> SCOPES = List.of(
             "https://www.googleapis.com/auth/youtube.readonly",
-            "https://www.googleapis.com/auth/yt-analytics.readonly"
+            "https://www.googleapis.com/auth/yt-analytics.readonly",
+            MONETARY_ANALYTICS_SCOPE
     );
 
     private final GoogleOAuthProperties properties;
@@ -93,7 +96,7 @@ public class YoutubeOAuthService {
                     encryptedRefreshToken,
                     tokens.expiresAt(),
                     tokens.tokenType(),
-                    tokens.scope(),
+                    resolveGrantedScopes(tokens.scope()),
                     selected.channelId(),
                     selected.title(),
                     selected.uploadsPlaylistId()
@@ -104,7 +107,7 @@ public class YoutubeOAuthService {
                     encryptedRefreshToken,
                     tokens.expiresAt(),
                     tokens.tokenType(),
-                    tokens.scope(),
+                    resolveGrantedScopes(tokens.scope()),
                     selected.channelId(),
                     selected.title(),
                     selected.uploadsPlaylistId()
@@ -129,9 +132,24 @@ public class YoutubeOAuthService {
                         credential.getUploadsPlaylistId(),
                         credential.getConnectedAt(),
                         credential.getUpdatedAt(),
-                        credential.getAccessTokenExpiresAt()
+                        credential.getAccessTokenExpiresAt(),
+                        hasScope(credential.getScopes(), MONETARY_ANALYTICS_SCOPE)
                 ))
-                .orElseGet(() -> new ConnectionStatus(false, null, null, null, null, null, null));
+                .orElseGet(() -> new ConnectionStatus(false, null, null, null, null, null, null, false));
+    }
+
+    private String resolveGrantedScopes(String tokenResponseScopes) {
+        return StringUtils.hasText(tokenResponseScopes)
+                ? tokenResponseScopes
+                : String.join(" ", SCOPES);
+    }
+
+    private boolean hasScope(String grantedScopes, String requiredScope) {
+        if (!StringUtils.hasText(grantedScopes)) {
+            return false;
+        }
+        return List.of(grantedScopes.trim().split("\\s+"))
+                .contains(requiredScope);
     }
 
     private YouTubeDataClient.ChannelMetadata selectChannel(List<YouTubeDataClient.ChannelMetadata> channels) {
@@ -171,7 +189,8 @@ public class YoutubeOAuthService {
             String uploadsPlaylistId,
             java.time.Instant connectedAt,
             java.time.Instant updatedAt,
-            java.time.Instant accessTokenExpiresAt
+            java.time.Instant accessTokenExpiresAt,
+            boolean monetaryAnalyticsGranted
     ) {
     }
 }

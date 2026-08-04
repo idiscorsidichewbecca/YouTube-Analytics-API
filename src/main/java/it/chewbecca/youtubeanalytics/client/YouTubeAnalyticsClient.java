@@ -44,7 +44,19 @@ public class YouTubeAnalyticsClient {
             "subscribersLost"
     );
     private static final String ENGAGED_VIEWS_METRIC = "engagedViews";
+    private static final String REVENUE_METRICS = String.join(",",
+            "views",
+            "estimatedRevenue",
+            "estimatedAdRevenue",
+            "estimatedRedPartnerRevenue",
+            "grossRevenue",
+            "monetizedPlaybacks",
+            "adImpressions",
+            "playbackBasedCpm",
+            "cpm"
+    );
     private static final int VIDEO_BATCH_SIZE = 100;
+    private static final int TOP_REVENUE_RESULTS_LIMIT = 200;
 
     private final RestClient restClient;
     private final GoogleAccessTokenService accessTokenService;
@@ -170,6 +182,89 @@ public class YouTubeAnalyticsClient {
 
         return merged.entrySet().stream()
                 .map(entry -> new TrendPoint(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    public RevenueMetrics getChannelRevenue(LocalDate startDate, LocalDate endDate, String currency) {
+        return firstRevenueMetrics(query(new AnalyticsQuery(
+                startDate, endDate, REVENUE_METRICS, null, null, null, null, null
+        ), currency));
+    }
+
+    public Map<String, RevenueMetrics> getAllVideoRevenue(List<String> videoIds,
+                                                          LocalDate startDate,
+                                                          LocalDate endDate,
+                                                          String currency) {
+        Map<String, RevenueMetrics> result = new LinkedHashMap<>();
+        if (videoIds == null || videoIds.isEmpty()) {
+            return result;
+        }
+
+        /*
+         * Il report ufficiale "Top videos" consente al massimo 200 righe e richiede
+         * un ordinamento. Recuperiamo prima quelle righe in una sola richiesta e poi
+         * interroghiamo singolarmente gli eventuali video mancanti, così nessun
+         * contenuto viene escluso quando il canale supera 200 pubblicazioni.
+         */
+        AnalyticsTable topVideos = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                REVENUE_METRICS,
+                "video",
+                null,
+                "-estimatedRevenue",
+                Math.min(TOP_REVENUE_RESULTS_LIMIT, videoIds.size()),
+                null
+        ), currency);
+        for (AnalyticsRow row : topVideos.rows()) {
+            String videoId = row.stringValue("video");
+            if (videoId != null && videoIds.contains(videoId)) {
+                result.put(videoId, toRevenueMetrics(row));
+            }
+        }
+
+        for (String videoId : videoIds) {
+            if (!result.containsKey(videoId)) {
+                result.put(videoId, getVideoRevenue(videoId, startDate, endDate, currency));
+            }
+        }
+        return result;
+    }
+
+    public RevenueMetrics getVideoRevenue(String videoId,
+                                          LocalDate startDate,
+                                          LocalDate endDate,
+                                          String currency) {
+        return firstRevenueMetrics(query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                REVENUE_METRICS,
+                null,
+                "video==" + videoId,
+                null,
+                null,
+                null
+        ), currency));
+    }
+
+    public List<RevenueTrendPoint> getRevenueTrend(String videoId,
+                                                   LocalDate startDate,
+                                                   LocalDate endDate,
+                                                   String dimension,
+                                                   String currency) {
+        String filter = StringUtils.hasText(videoId) ? "video==" + videoId : null;
+        AnalyticsTable table = query(new AnalyticsQuery(
+                startDate,
+                endDate,
+                REVENUE_METRICS,
+                dimension,
+                filter,
+                dimension,
+                null,
+                null
+        ), currency);
+        return table.rows().stream()
+                .map(row -> new RevenueTrendPoint(row.stringValue(dimension), toRevenueMetrics(row)))
                 .toList();
     }
 
@@ -363,6 +458,10 @@ public class YouTubeAnalyticsClient {
     }
 
     private AnalyticsTable query(AnalyticsQuery analyticsQuery) {
+        return query(analyticsQuery, null);
+    }
+
+    private AnalyticsTable query(AnalyticsQuery analyticsQuery, String currency) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(REPORTS_URL)
                 .queryParam("ids", "channel==MINE")
                 .queryParam("startDate", analyticsQuery.startDate())
@@ -384,6 +483,9 @@ public class YouTubeAnalyticsClient {
         if (analyticsQuery.startIndex() != null) {
             builder.queryParam("startIndex", analyticsQuery.startIndex());
         }
+        if (StringUtils.hasText(currency)) {
+            builder.queryParam("currency", currency);
+        }
 
         URI uri = builder.build().encode().toUri();
         log.debug("YouTube Analytics query: {}", uri);
@@ -403,6 +505,10 @@ public class YouTubeAnalyticsClient {
 
     private AnalyticsMetrics firstMetrics(AnalyticsTable table) {
         return table.rows().isEmpty() ? AnalyticsMetrics.empty() : toMetrics(table.rows().getFirst());
+    }
+
+    private RevenueMetrics firstRevenueMetrics(AnalyticsTable table) {
+        return table.rows().isEmpty() ? RevenueMetrics.empty() : toRevenueMetrics(table.rows().getFirst());
     }
 
     private void mergeDimensionTable(Map<String, AnalyticsMetrics> target,
@@ -480,6 +586,20 @@ public class YouTubeAnalyticsClient {
             rows.add(new AnalyticsRow(values));
         }
         return new AnalyticsTable(headers, rows);
+    }
+
+    private RevenueMetrics toRevenueMetrics(AnalyticsRow row) {
+        return new RevenueMetrics(
+                row.longValue("views"),
+                row.doubleValue("estimatedRevenue"),
+                row.doubleValue("estimatedAdRevenue"),
+                row.doubleValue("estimatedRedPartnerRevenue"),
+                row.doubleValue("grossRevenue"),
+                row.longValue("monetizedPlaybacks"),
+                row.longValue("adImpressions"),
+                row.doubleValue("playbackBasedCpm"),
+                row.doubleValue("cpm")
+        );
     }
 
     private AnalyticsMetrics toMetrics(AnalyticsRow row) {
@@ -585,4 +705,32 @@ public class YouTubeAnalyticsClient {
             double estimatedMinutesWatched
     ) {
     }
+
+    public record RevenueMetrics(
+            long views,
+            double estimatedRevenue,
+            double estimatedAdRevenue,
+            double estimatedPremiumRevenue,
+            double grossRevenue,
+            long monetizedPlaybacks,
+            long adImpressions,
+            double playbackBasedCpm,
+            double adImpressionCpm
+    ) {
+        public static RevenueMetrics empty() {
+            return new RevenueMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        public double estimatedRpm() {
+            return views == 0 ? 0 : estimatedRevenue * 1000.0 / views;
+        }
+
+        public double monetizedPlaybackRatePercentage() {
+            return views == 0 ? 0 : monetizedPlaybacks * 100.0 / views;
+        }
+    }
+
+    public record RevenueTrendPoint(String period, RevenueMetrics metrics) {
+    }
+
 }

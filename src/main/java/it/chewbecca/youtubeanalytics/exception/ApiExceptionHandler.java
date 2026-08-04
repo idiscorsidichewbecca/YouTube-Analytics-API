@@ -20,8 +20,8 @@ public class ApiExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
-    @ExceptionHandler(YoutubeNotConnectedException.class)
-    ResponseEntity<ApiError> notConnected(YoutubeNotConnectedException ex) {
+    @ExceptionHandler({YoutubeNotConnectedException.class, YoutubeMonetaryScopeException.class})
+    ResponseEntity<ApiError> youtubeUnavailable(RuntimeException ex) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
