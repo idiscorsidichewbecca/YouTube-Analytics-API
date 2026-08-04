@@ -76,7 +76,7 @@ app:
     shorts-duration-fallback-seconds: 180
     shorts-duration-fallback-enabled: true
     shorts-detection-start-date: 2020-09-14
-    max-page-size: 100
+    max-page-size: 500
     forced-short-ids: []
     forced-video-ids: []
 

@@ -411,3 +411,9 @@ META_EXPECTED_INSTAGRAM_ACCOUNT_ID=...
 Nel pannello Meta, `META_REDIRECT_URI` deve coincidere carattere per carattere con l'URI OAuth valido registrato.
 
 Non inserire `META_APP_SECRET`, token Meta o chiavi di cifratura nel repository.
+
+## Ottimizzazione ricavi per contenuto
+
+`GET /api/v1/revenue/content` ora recupera il report monetario raggruppato per video usando `startIndex` e pagine YouTube da 200 righe. Non esegue più una richiesta separata per ciascun video oltre i primi 200.
+
+La dimensione massima della risposta applicativa è stata portata a 500, così il Content Hub può importare tutti i contenuti del canale con una sola chiamata paginata lato applicazione.

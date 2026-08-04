@@ -201,32 +201,42 @@ public class YouTubeAnalyticsClient {
         }
 
         /*
-         * Il report ufficiale "Top videos" consente al massimo 200 righe e richiede
-         * un ordinamento. Recuperiamo prima quelle righe in una sola richiesta e poi
-         * interroghiamo singolarmente gli eventuali video mancanti, così nessun
-         * contenuto viene escluso quando il canale supera 200 pubblicazioni.
+         * I report raggruppati per video espongono al massimo 200 righe per richiesta,
+         * ma supportano startIndex. Paginiamo il report YouTube direttamente invece di
+         * eseguire una richiesta separata per ogni video oltre i primi 200.
+         *
+         * Oltre a ridurre drasticamente il tempo di risposta, questo evita che
+         * /api/v1/revenue/content superi il timeout quando il canale contiene molti video.
          */
-        AnalyticsTable topVideos = query(new AnalyticsQuery(
-                startDate,
-                endDate,
-                REVENUE_METRICS,
-                "video",
-                null,
-                "-estimatedRevenue",
-                Math.min(TOP_REVENUE_RESULTS_LIMIT, videoIds.size()),
-                null
-        ), currency);
-        for (AnalyticsRow row : topVideos.rows()) {
-            String videoId = row.stringValue("video");
-            if (videoId != null && videoIds.contains(videoId)) {
-                result.put(videoId, toRevenueMetrics(row));
+        int startIndex = 1;
+        while (true) {
+            AnalyticsTable page = query(new AnalyticsQuery(
+                    startDate,
+                    endDate,
+                    REVENUE_METRICS,
+                    "video",
+                    null,
+                    "-estimatedRevenue",
+                    TOP_REVENUE_RESULTS_LIMIT,
+                    startIndex
+            ), currency);
+
+            for (AnalyticsRow row : page.rows()) {
+                String videoId = row.stringValue("video");
+                if (videoId != null && videoIds.contains(videoId)) {
+                    result.put(videoId, toRevenueMetrics(row));
+                }
             }
+
+            if (page.rows().size() < TOP_REVENUE_RESULTS_LIMIT) {
+                break;
+            }
+            startIndex += TOP_REVENUE_RESULTS_LIMIT;
         }
 
+        // I contenuti senza righe monetarie restano presenti con metriche economiche a zero.
         for (String videoId : videoIds) {
-            if (!result.containsKey(videoId)) {
-                result.put(videoId, getVideoRevenue(videoId, startDate, endDate, currency));
-            }
+            result.putIfAbsent(videoId, RevenueMetrics.empty());
         }
         return result;
     }
