@@ -175,10 +175,14 @@ public class YoutubeRevenueService {
         accessTokenService.requireMonetaryAnalyticsScope();
         DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
         String normalizedCurrency = normalizeCurrency(currency);
+        LocalDate analyticsStart = granularity == TrendGranularity.MONTH
+                ? YearMonth.from(range.startDate()).atDay(1) : range.startDate();
+        LocalDate analyticsEnd = granularity == TrendGranularity.MONTH
+                ? YearMonth.from(range.endDate()).atDay(1) : range.endDate();
         List<YouTubeAnalyticsClient.RevenueTrendPoint> rawPoints = analyticsClient.getRevenueTrend(
                 videoId,
-                range.startDate(),
-                range.endDate(),
+                analyticsStart,
+                analyticsEnd,
                 analyticsDimensionFor(granularity),
                 normalizedCurrency
         );
@@ -196,7 +200,7 @@ public class YoutubeRevenueService {
     private List<ApiModels.RevenueTrendPointResponse> normalizeTrend(
             List<YouTubeAnalyticsClient.RevenueTrendPoint> rawPoints,
             TrendGranularity granularity) {
-        if (granularity == TrendGranularity.DAY) {
+        if (granularity == TrendGranularity.DAY || granularity == TrendGranularity.MONTH) {
             return rawPoints.stream()
                     .map(point -> new ApiModels.RevenueTrendPointResponse(
                             point.period(),
@@ -303,7 +307,7 @@ public class YoutubeRevenueService {
     }
 
     private String analyticsDimensionFor(TrendGranularity granularity) {
-        return granularity == TrendGranularity.MONTH ? "day" : granularity.analyticsDimension();
+        return granularity.analyticsDimension();
     }
 
     private void validatePage(int page, int size) {

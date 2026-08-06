@@ -75,8 +75,8 @@ public class YoutubeReportService {
                                                 TrendGranularity granularity) {
         DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
         List<YouTubeAnalyticsClient.TrendPoint> rawPoints = analyticsClient.getChannelTrend(
-                range.startDate(),
-                range.endDate(),
+                analyticsStart(range, granularity),
+                analyticsEnd(range, granularity),
                 analyticsDimensionFor(granularity)
         );
         List<ApiModels.TrendPointResponse> points = normalizeTrend(rawPoints, granularity);
@@ -189,8 +189,8 @@ public class YoutubeReportService {
         DateRangeResolver.DateRange range = dateRangeResolver.resolve(startDate, endDate);
         List<YouTubeAnalyticsClient.TrendPoint> rawPoints = analyticsClient.getVideoTrend(
                 videoId,
-                range.startDate(),
-                range.endDate(),
+                analyticsStart(range, granularity),
+                analyticsEnd(range, granularity),
                 analyticsDimensionFor(granularity)
         );
         List<ApiModels.TrendPointResponse> points = normalizeTrend(rawPoints, granularity);
@@ -482,20 +482,26 @@ public class YoutubeReportService {
         return video;
     }
 
+    private LocalDate analyticsStart(DateRangeResolver.DateRange range, TrendGranularity granularity) {
+        return granularity == TrendGranularity.MONTH
+                ? YearMonth.from(range.startDate()).atDay(1)
+                : range.startDate();
+    }
+
+    private LocalDate analyticsEnd(DateRangeResolver.DateRange range, TrendGranularity granularity) {
+        return granularity == TrendGranularity.MONTH
+                ? YearMonth.from(range.endDate()).atDay(1)
+                : range.endDate();
+    }
+
     private String analyticsDimensionFor(TrendGranularity granularity) {
-        /*
-         * La dimensione YouTube Analytics "month" accetta solo startDate ed endDate
-         * impostate al primo giorno del mese. Per mantenere esattamente il periodo
-         * richiesto dal chiamante, recuperiamo i dati giornalieri e li raggruppiamo
-         * in Java quando viene richiesta la granularità mensile.
-         */
-        return granularity == TrendGranularity.MONTH ? "day" : granularity.analyticsDimension();
+        return granularity.analyticsDimension();
     }
 
     private List<ApiModels.TrendPointResponse> normalizeTrend(
             List<YouTubeAnalyticsClient.TrendPoint> rawPoints,
             TrendGranularity granularity) {
-        if (granularity == TrendGranularity.DAY) {
+        if (granularity == TrendGranularity.DAY || granularity == TrendGranularity.MONTH) {
             return rawPoints.stream()
                     .map(point -> new ApiModels.TrendPointResponse(point.period(), mapper.metrics(point.metrics())))
                     .toList();

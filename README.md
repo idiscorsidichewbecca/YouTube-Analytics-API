@@ -417,3 +417,7 @@ Non inserire `META_APP_SECRET`, token Meta o chiavi di cifratura nel repository.
 `GET /api/v1/revenue/content` ora recupera il report monetario raggruppato per video usando `startIndex` e pagine YouTube da 200 righe. Non esegue più una richiesta separata per ciascun video oltre i primi 200.
 
 La dimensione massima della risposta applicativa è stata portata a 500, così il Content Hub può importare tutti i contenuti del canale con una sola chiamata paginata lato applicazione.
+
+## Revenue robuste e storico mensile
+
+La release corrente separa i ricavi stimati principali dalle metriche pubblicitarie opzionali, pagina il report per video e usa la dimensione mensile nativa. È inoltre disponibile `GET /api/v1/integration/youtube/status` per verificare il permesso monetario. Vedi `docs/ROBUST_REVENUE_AND_MONTHLY_HISTORY.md`.

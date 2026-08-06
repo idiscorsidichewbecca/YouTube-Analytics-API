@@ -44,11 +44,18 @@ public class YouTubeAnalyticsClient {
             "subscribersLost"
     );
     private static final String ENGAGED_VIEWS_METRIC = "engagedViews";
-    private static final String REVENUE_METRICS = String.join(",",
+    // Il totale stimato è la metrica monetaria indispensabile. Le componenti vengono
+    // richieste separatamente: un'eventuale incompatibilità di una metrica secondaria
+    // non deve impedire di acquisire il ricavo totale del video.
+    private static final String TOTAL_REVENUE_METRICS = String.join(",",
             "views",
-            "estimatedRevenue",
+            "estimatedRevenue"
+    );
+    private static final String REVENUE_COMPONENT_METRICS = String.join(",",
             "estimatedAdRevenue",
-            "estimatedRedPartnerRevenue",
+            "estimatedRedPartnerRevenue"
+    );
+    private static final String AD_PERFORMANCE_METRICS = String.join(",",
             "grossRevenue",
             "monetizedPlaybacks",
             "adImpressions",
@@ -56,6 +63,7 @@ public class YouTubeAnalyticsClient {
             "cpm"
     );
     private static final int VIDEO_BATCH_SIZE = 100;
+    private static final int VIDEO_REVENUE_FILTER_BATCH_SIZE = 500;
     private static final int TOP_REVENUE_RESULTS_LIMIT = 200;
 
     private final RestClient restClient;
@@ -186,57 +194,60 @@ public class YouTubeAnalyticsClient {
     }
 
     public RevenueMetrics getChannelRevenue(LocalDate startDate, LocalDate endDate, String currency) {
-        return firstRevenueMetrics(query(new AnalyticsQuery(
-                startDate, endDate, REVENUE_METRICS, null, null, null, null, null
+        RevenueMetrics total = firstRevenueMetrics(query(new AnalyticsQuery(
+                startDate, endDate, TOTAL_REVENUE_METRICS, null, null, null, null, null
         ), currency));
+        RevenueMetrics components = firstRevenueMetrics(queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, REVENUE_COMPONENT_METRICS, null, null, null, null, null
+        ), currency));
+        RevenueMetrics ads = firstRevenueMetrics(queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, AD_PERFORMANCE_METRICS, null, null, null, null, null
+        ), currency));
+        return mergeRevenue(mergeRevenue(total, components), ads);
     }
 
     public Map<String, RevenueMetrics> getAllVideoRevenue(List<String> videoIds,
                                                           LocalDate startDate,
                                                           LocalDate endDate,
                                                           String currency) {
+        if (videoIds == null || videoIds.isEmpty()) return new LinkedHashMap<>();
+        Map<String, RevenueMetrics> result = pagedVideoRevenue(
+                videoIds, startDate, endDate, currency, TOTAL_REVENUE_METRICS, false);
+        Map<String, RevenueMetrics> optionalComponents = pagedVideoRevenue(
+                videoIds, startDate, endDate, currency, REVENUE_COMPONENT_METRICS, true);
+        optionalComponents.forEach((videoId, metrics) -> result.merge(videoId, metrics, this::mergeRevenue));
+        Map<String, RevenueMetrics> optionalAds = pagedVideoRevenue(
+                videoIds, startDate, endDate, currency, AD_PERFORMANCE_METRICS, true);
+        optionalAds.forEach((videoId, metrics) -> result.merge(videoId, metrics, this::mergeRevenue));
+        for (String videoId : videoIds) result.putIfAbsent(videoId, RevenueMetrics.empty());
+        return result;
+    }
+
+    private Map<String, RevenueMetrics> pagedVideoRevenue(List<String> videoIds,
+                                                           LocalDate startDate,
+                                                           LocalDate endDate,
+                                                           String currency,
+                                                           String metrics,
+                                                           boolean optional) {
         Map<String, RevenueMetrics> result = new LinkedHashMap<>();
-        if (videoIds == null || videoIds.isEmpty()) {
-            return result;
-        }
-
-        /*
-         * I report raggruppati per video espongono al massimo 200 righe per richiesta,
-         * ma supportano startIndex. Paginiamo il report YouTube direttamente invece di
-         * eseguire una richiesta separata per ogni video oltre i primi 200.
-         *
-         * Oltre a ridurre drasticamente il tempo di risposta, questo evita che
-         * /api/v1/revenue/content superi il timeout quando il canale contiene molti video.
-         */
-        int startIndex = 1;
-        while (true) {
-            AnalyticsTable page = query(new AnalyticsQuery(
-                    startDate,
-                    endDate,
-                    REVENUE_METRICS,
-                    "video",
-                    null,
-                    "-estimatedRevenue",
-                    TOP_REVENUE_RESULTS_LIMIT,
-                    startIndex
-            ), currency);
-
-            for (AnalyticsRow row : page.rows()) {
-                String videoId = row.stringValue("video");
-                if (videoId != null && videoIds.contains(videoId)) {
-                    result.put(videoId, toRevenueMetrics(row));
+        for (int from = 0; from < videoIds.size(); from += VIDEO_REVENUE_FILTER_BATCH_SIZE) {
+            List<String> batch = videoIds.subList(
+                    from, Math.min(from + VIDEO_REVENUE_FILTER_BATCH_SIZE, videoIds.size()));
+            String filter = "video==" + String.join(",", batch);
+            int startIndex = 1;
+            while (true) {
+                AnalyticsQuery request = new AnalyticsQuery(startDate, endDate, metrics, "video", filter,
+                        "video", TOP_REVENUE_RESULTS_LIMIT, startIndex);
+                AnalyticsTable page = optional ? queryOptionalRevenue(request, currency) : query(request, currency);
+                for (AnalyticsRow row : page.rows()) {
+                    String videoId = row.stringValue("video");
+                    if (videoId != null) {
+                        result.merge(videoId, toRevenueMetrics(row), this::mergeRevenue);
+                    }
                 }
+                if (page.rows().size() < TOP_REVENUE_RESULTS_LIMIT) break;
+                startIndex += TOP_REVENUE_RESULTS_LIMIT;
             }
-
-            if (page.rows().size() < TOP_REVENUE_RESULTS_LIMIT) {
-                break;
-            }
-            startIndex += TOP_REVENUE_RESULTS_LIMIT;
-        }
-
-        // I contenuti senza righe monetarie restano presenti con metriche economiche a zero.
-        for (String videoId : videoIds) {
-            result.putIfAbsent(videoId, RevenueMetrics.empty());
         }
         return result;
     }
@@ -245,16 +256,17 @@ public class YouTubeAnalyticsClient {
                                           LocalDate startDate,
                                           LocalDate endDate,
                                           String currency) {
-        return firstRevenueMetrics(query(new AnalyticsQuery(
-                startDate,
-                endDate,
-                REVENUE_METRICS,
-                null,
-                "video==" + videoId,
-                null,
-                null,
-                null
+        String filter = "video==" + videoId;
+        RevenueMetrics total = firstRevenueMetrics(query(new AnalyticsQuery(
+                startDate, endDate, TOTAL_REVENUE_METRICS, null, filter, null, null, null
         ), currency));
+        RevenueMetrics components = firstRevenueMetrics(queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, REVENUE_COMPONENT_METRICS, null, filter, null, null, null
+        ), currency));
+        RevenueMetrics ads = firstRevenueMetrics(queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, AD_PERFORMANCE_METRICS, null, filter, null, null, null
+        ), currency));
+        return mergeRevenue(mergeRevenue(total, components), ads);
     }
 
     public List<RevenueTrendPoint> getRevenueTrend(String videoId,
@@ -263,18 +275,18 @@ public class YouTubeAnalyticsClient {
                                                    String dimension,
                                                    String currency) {
         String filter = StringUtils.hasText(videoId) ? "video==" + videoId : null;
-        AnalyticsTable table = query(new AnalyticsQuery(
-                startDate,
-                endDate,
-                REVENUE_METRICS,
-                dimension,
-                filter,
-                dimension,
-                null,
-                null
-        ), currency);
-        return table.rows().stream()
-                .map(row -> new RevenueTrendPoint(row.stringValue(dimension), toRevenueMetrics(row)))
+        Map<String, RevenueMetrics> merged = new LinkedHashMap<>();
+        mergeRevenueDimensionTable(merged, query(new AnalyticsQuery(
+                startDate, endDate, TOTAL_REVENUE_METRICS, dimension, filter, dimension, null, null
+        ), currency), dimension);
+        mergeRevenueDimensionTable(merged, queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, REVENUE_COMPONENT_METRICS, dimension, filter, dimension, null, null
+        ), currency), dimension);
+        mergeRevenueDimensionTable(merged, queryOptionalRevenue(new AnalyticsQuery(
+                startDate, endDate, AD_PERFORMANCE_METRICS, dimension, filter, dimension, null, null
+        ), currency), dimension);
+        return merged.entrySet().stream()
+                .map(entry -> new RevenueTrendPoint(entry.getKey(), entry.getValue()))
                 .toList();
     }
 
@@ -452,6 +464,20 @@ public class YouTubeAnalyticsClient {
                 .sum();
     }
 
+    private AnalyticsTable queryOptionalRevenue(AnalyticsQuery analyticsQuery, String currency) {
+        try {
+            return query(analyticsQuery, currency);
+        } catch (GoogleApiException exception) {
+            if (exception.getStatusCode() == 400) {
+                log.warn("Metriche pubblicitarie opzionali non supportate per metrics={} dimensions={}; " +
+                                "i ricavi stimati principali restano disponibili. Risposta={}",
+                        analyticsQuery.metrics(), analyticsQuery.dimensions(), exception.getResponseBody());
+                return new AnalyticsTable(List.of(), List.of());
+            }
+            throw exception;
+        }
+    }
+
     private AnalyticsTable queryOptional(AnalyticsQuery analyticsQuery) {
         try {
             return query(analyticsQuery);
@@ -530,6 +556,31 @@ public class YouTubeAnalyticsClient {
                 target.merge(key, toMetrics(row), (left, right) -> merge(left, right));
             }
         }
+    }
+
+    private void mergeRevenueDimensionTable(Map<String, RevenueMetrics> target,
+                                            AnalyticsTable table,
+                                            String dimension) {
+        for (AnalyticsRow row : table.rows()) {
+            String key = row.stringValue(dimension);
+            if (key != null) target.merge(key, toRevenueMetrics(row), this::mergeRevenue);
+        }
+    }
+
+    private RevenueMetrics mergeRevenue(RevenueMetrics first, RevenueMetrics second) {
+        if (first == null) return second == null ? RevenueMetrics.empty() : second;
+        if (second == null) return first;
+        return new RevenueMetrics(
+                Math.max(first.views(), second.views()),
+                first.estimatedRevenue() + second.estimatedRevenue(),
+                first.estimatedAdRevenue() + second.estimatedAdRevenue(),
+                first.estimatedPremiumRevenue() + second.estimatedPremiumRevenue(),
+                first.grossRevenue() + second.grossRevenue(),
+                first.monetizedPlaybacks() + second.monetizedPlaybacks(),
+                first.adImpressions() + second.adImpressions(),
+                second.playbackBasedCpm() != 0 ? second.playbackBasedCpm() : first.playbackBasedCpm(),
+                second.adImpressionCpm() != 0 ? second.adImpressionCpm() : first.adImpressionCpm()
+        );
     }
 
     private AnalyticsMetrics merge(AnalyticsMetrics first, AnalyticsMetrics second) {
