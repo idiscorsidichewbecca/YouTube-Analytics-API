@@ -3,7 +3,7 @@ set -eu
 BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DISTRIBUTION_URL=$(sed -n 's/^distributionUrl=//p' "$BASE_DIR/.mvn/wrapper/maven-wrapper.properties")
 MAVEN_VERSION=3.9.11
-CACHE_DIR="${HOME}/.m2/wrapper/dists/apache-maven-${MAVEN_VERSION}"
+CACHE_DIR="${MAVEN_WRAPPER_CACHE:-${HOME}/.m2/wrapper/dists/apache-maven-${MAVEN_VERSION}}"
 MAVEN_HOME="$CACHE_DIR/apache-maven-${MAVEN_VERSION}"
 if [ ! -x "$MAVEN_HOME/bin/mvn" ]; then
   mkdir -p "$CACHE_DIR"

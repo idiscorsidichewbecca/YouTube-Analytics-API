@@ -395,6 +395,16 @@ Le istruzioni operative aggiornate sono in `gpt-action-instructions.txt` e obbli
 
 ## Rilascio su Render
 
+### Chewbecca-Strategist nel gruppo Telegram
+
+Il progetto include un bot topic-aware che usa OpenAI Responses API e tutte le
+44 Actions già dichiarate in `openapi-gpt.yaml`. Il modello può richiamare più
+endpoint analytics, incrociare i dati e restituire la propria analisi nello
+stesso topic. Neon mantiene una conversazione distinta per ogni topic.
+
+Configurazione Render, variabili, webhook e comandi sono descritti in
+[`docs/TELEGRAM-STRATEGIST.md`](docs/TELEGRAM-STRATEGIST.md).
+
 Mantieni tutte le variabili YouTube esistenti e aggiungi:
 
 ```dotenv

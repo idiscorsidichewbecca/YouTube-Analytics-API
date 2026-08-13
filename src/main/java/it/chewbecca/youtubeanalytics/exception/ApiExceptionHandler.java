@@ -4,6 +4,7 @@ import it.chewbecca.youtubeanalytics.client.GoogleApiException;
 import it.chewbecca.youtubeanalytics.meta.client.MetaGraphApiException;
 import it.chewbecca.youtubeanalytics.meta.exception.MetaNotConnectedException;
 import it.chewbecca.youtubeanalytics.meta.exception.MetaTokenExpiredException;
+import it.chewbecca.youtubeanalytics.telegram.client.TelegramClient.TelegramDeliveryException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -50,6 +51,13 @@ public class ApiExceptionHandler {
     ResponseEntity<ApiError> metaApi(MetaGraphApiException ex) {
         log.error("Meta Graph API error operation={} status={} code={} subcode={} body={}",
                 ex.getOperation(), ex.getStatusCode(), ex.getGraphCode(), ex.getGraphSubcode(), ex.getResponseBody());
+        return error(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(TelegramDeliveryException.class)
+    ResponseEntity<ApiError> telegramApi(TelegramDeliveryException ex) {
+        // Non loggare l'eccezione HTTP originale: l'URL Telegram contiene il bot token.
+        log.error("Invio risposta Telegram non riuscito");
         return error(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 

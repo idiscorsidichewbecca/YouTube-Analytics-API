@@ -40,6 +40,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/oauth2/google/callback",
                                 "/oauth2/meta/callback",
+                                "/api/integrations/telegram/webhook",
                                 "/actuator/health/**",
                                 "/privacy-policy.html",
                                 "/openapi-gpt.yaml",

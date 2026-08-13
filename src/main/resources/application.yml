@@ -71,6 +71,21 @@ app:
     max-content-items: 500
     token-expiry-fallback-days: 60
 
+  telegram:
+    enabled: ${TELEGRAM_ENABLED:false}
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    bot-username: ${TELEGRAM_BOT_USERNAME:}
+    webhook-secret: ${TELEGRAM_WEBHOOK_SECRET:}
+    allowed-chat-id: ${TELEGRAM_ALLOWED_CHAT_ID:0}
+
+  assistant:
+    enabled: ${ASSISTANT_ENABLED:false}
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:gpt-5.6-luna}
+    actions-base-url: ${ASSISTANT_ACTIONS_BASE_URL:}
+    max-output-tokens: ${OPENAI_MAX_OUTPUT_TOKENS:3000}
+    max-tool-rounds: ${OPENAI_MAX_TOOL_ROUNDS:6}
+
   youtube:
     default-report-days: 28
     shorts-duration-fallback-seconds: 180
