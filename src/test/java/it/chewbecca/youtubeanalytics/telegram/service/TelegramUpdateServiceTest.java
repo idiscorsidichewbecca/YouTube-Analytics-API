@@ -6,7 +6,6 @@ import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate;
 import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate.TelegramChat;
 import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate.TelegramMessage;
 import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate.TelegramUser;
-import it.chewbecca.youtubeanalytics.assistant.service.ChewbeccaStrategistService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +17,7 @@ class TelegramUpdateServiceTest {
 
     private static final long ALLOWED_CHAT_ID = -1001234567890L;
     private TelegramClient telegramClient;
-    private ChewbeccaStrategistService strategistService;
+    private TelegramAnalyticsService analyticsService;
     private TelegramUpdateService service;
 
     @BeforeEach
@@ -31,14 +30,17 @@ class TelegramUpdateServiceTest {
                 ALLOWED_CHAT_ID
         );
         telegramClient = mock(TelegramClient.class);
-        strategistService = mock(ChewbeccaStrategistService.class);
-        service = new TelegramUpdateService(properties, telegramClient, strategistService);
+        analyticsService = mock(TelegramAnalyticsService.class);
+        service = new TelegramUpdateService(properties, telegramClient, analyticsService);
     }
 
     @Test
     void repliesToMentionedPingInTheSameTopic() {
         TelegramUpdate update = update(1L, ALLOWED_CHAT_ID, 77L, 900L,
                 "@chewbecca_strategist_bot ping");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "ping", "chewbecca_strategist_bot"))
+                .thenReturn("Bot attivo ✅");
 
         service.process(update);
 
@@ -49,6 +51,9 @@ class TelegramUpdateServiceTest {
     void repliesToTelegramCommandWithBotUsername() {
         TelegramUpdate update = update(2L, ALLOWED_CHAT_ID, 88L, 901L,
                 "/ping@chewbecca_strategist_bot");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "/ping", "chewbecca_strategist_bot"))
+                .thenReturn("Bot attivo ✅");
 
         service.process(update);
 
@@ -68,6 +73,9 @@ class TelegramUpdateServiceTest {
     @Test
     void ignoresDuplicateTelegramUpdate() {
         TelegramUpdate update = update(4L, ALLOWED_CHAT_ID, 77L, 903L, "/ping");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "/ping", "chewbecca_strategist_bot"))
+                .thenReturn("Bot attivo ✅");
 
         service.process(update);
         service.process(update);
@@ -85,48 +93,50 @@ class TelegramUpdateServiceTest {
     }
 
     @Test
-    void sendsMentionedPromptToStrategistAndRepliesInTheSameTopic() {
+    void sendsMentionedNaturalLanguageRequestToDeterministicAnalytics() {
         TelegramUpdate update = update(6L, ALLOWED_CHAT_ID, 91L, 905L,
-                "@chewbecca_strategist_bot Confronta gli ultimi Short");
-        org.mockito.Mockito.when(strategistService.reply(
-                        ALLOWED_CHAT_ID, 91L, "@simone", "Confronta gli ultimi Short"))
-                .thenReturn("Gli ultimi Short mostrano...");
+                "@chewbecca_strategist_bot dimmi i top video");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "dimmi i top video", "chewbecca_strategist_bot"))
+                .thenReturn("Top video per visualizzazioni...");
 
         service.process(update);
 
-        verify(strategistService).reply(
-                ALLOWED_CHAT_ID, 91L, "@simone", "Confronta gli ultimi Short");
+        verify(analyticsService).answer(
+                "dimmi i top video", "chewbecca_strategist_bot");
         verify(telegramClient).sendMessage(
-                ALLOWED_CHAT_ID, 91L, 905L, "Gli ultimi Short mostrano...");
+                ALLOWED_CHAT_ID, 91L, 905L, "Top video per visualizzazioni...");
     }
 
     @Test
-    void sendsAskCommandPromptToStrategistWithPrivacyModeEnabled() {
+    void sendsCommandToDeterministicAnalyticsWithPrivacyModeEnabled() {
         TelegramUpdate update = update(8L, ALLOWED_CHAT_ID, 93L, 907L,
-                "/ask@chewbecca_strategist_bot Incrocia views e ricavi di luglio");
-        org.mockito.Mockito.when(strategistService.reply(
-                        ALLOWED_CHAT_ID, 93L, "@simone", "Incrocia views e ricavi di luglio"))
-                .thenReturn("Analisi incrociata...");
+                "/confrontomese@chewbecca_strategist_bot 2025-07");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "/confrontomese 2025-07", "chewbecca_strategist_bot"))
+                .thenReturn("Confronto mensile...");
 
         service.process(update);
 
-        verify(strategistService).reply(
-                ALLOWED_CHAT_ID, 93L, "@simone", "Incrocia views e ricavi di luglio");
+        verify(analyticsService).answer(
+                "/confrontomese 2025-07", "chewbecca_strategist_bot");
         verify(telegramClient).sendMessage(
-                ALLOWED_CHAT_ID, 93L, 907L, "Analisi incrociata...");
+                ALLOWED_CHAT_ID, 93L, 907L, "Confronto mensile...");
     }
 
     @Test
-    void resetsOnlyTheCurrentTopicConversation() {
+    void returnsHelpInTheCurrentTopic() {
         TelegramUpdate update = update(7L, ALLOWED_CHAT_ID, 92L, 906L,
-                "/reset@chewbecca_strategist_bot");
+                "/help@chewbecca_strategist_bot");
+        org.mockito.Mockito.when(analyticsService.answer(
+                        "/help", "chewbecca_strategist_bot"))
+                .thenReturn("Comandi disponibili...");
 
         service.process(update);
 
-        verify(strategistService).reset(ALLOWED_CHAT_ID, 92L);
+        verify(analyticsService).answer("/help", "chewbecca_strategist_bot");
         verify(telegramClient).sendMessage(
-                ALLOWED_CHAT_ID, 92L, 906L,
-                "Memoria di Chewbecca-Strategist azzerata per questo topic ✅");
+                ALLOWED_CHAT_ID, 92L, 906L, "Comandi disponibili...");
     }
 
     private TelegramUpdate update(long updateId, long chatId, Long threadId, long messageId, String text) {

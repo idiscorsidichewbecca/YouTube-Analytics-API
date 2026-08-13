@@ -397,10 +397,10 @@ Le istruzioni operative aggiornate sono in `gpt-action-instructions.txt` e obbli
 
 ### Chewbecca-Strategist nel gruppo Telegram
 
-Il progetto include un bot topic-aware che usa OpenAI Responses API e tutte le
-44 Actions già dichiarate in `openapi-gpt.yaml`. Il modello può richiamare più
-endpoint analytics, incrociare i dati e restituire la propria analisi nello
-stesso topic. Neon mantiene una conversazione distinta per ogni topic.
+Il progetto include un bot topic-aware senza AI e senza costi OpenAI. Riconosce
+comandi e alcune frasi predefinite, interroga direttamente i servizi YouTube e
+calcola in Java classifiche, variazioni percentuali e confronti temporali. Il
+GPT configurato in ChatGPT e le 44 Actions esistenti rimangono invariati.
 
 Configurazione Render, variabili, webhook e comandi sono descritti in
 [`docs/TELEGRAM-STRATEGIST.md`](docs/TELEGRAM-STRATEGIST.md).

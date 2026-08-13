@@ -78,6 +78,10 @@ app:
     webhook-secret: ${TELEGRAM_WEBHOOK_SECRET:}
     allowed-chat-id: ${TELEGRAM_ALLOWED_CHAT_ID:0}
 
+  telegram-analytics:
+    restart-dates: ${CHANNEL_RESTART_DATES:}
+    restart-window-days: ${CHANNEL_RESTART_WINDOW_DAYS:30}
+
   assistant:
     enabled: ${ASSISTANT_ENABLED:false}
     api-key: ${OPENAI_API_KEY:}

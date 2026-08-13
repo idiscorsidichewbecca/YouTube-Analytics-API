@@ -6,9 +6,6 @@ import it.chewbecca.youtubeanalytics.telegram.client.TelegramClient;
 import it.chewbecca.youtubeanalytics.telegram.config.TelegramProperties;
 import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate;
 import it.chewbecca.youtubeanalytics.telegram.model.TelegramUpdate.TelegramMessage;
-import it.chewbecca.youtubeanalytics.assistant.service.ChewbeccaStrategistService;
-import it.chewbecca.youtubeanalytics.assistant.client.OpenAiResponsesClient.OpenAiApiException;
-import it.chewbecca.youtubeanalytics.assistant.service.ChewbeccaStrategistService.AssistantUnavailableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,11 +19,9 @@ import java.util.Locale;
 public class TelegramUpdateService {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramUpdateService.class);
-    private static final String PING_REPLY = "Bot attivo ✅";
-
     private final TelegramProperties properties;
     private final TelegramClient telegramClient;
-    private final ChewbeccaStrategistService strategistService;
+    private final TelegramAnalyticsService analyticsService;
     private final Cache<Long, Boolean> processedUpdates = Caffeine.newBuilder()
             .maximumSize(10_000)
             .expireAfterWrite(Duration.ofHours(1))
@@ -34,10 +29,10 @@ public class TelegramUpdateService {
 
     public TelegramUpdateService(TelegramProperties properties,
                                  TelegramClient telegramClient,
-                                 ChewbeccaStrategistService strategistService) {
+                                 TelegramAnalyticsService analyticsService) {
         this.properties = properties;
         this.telegramClient = telegramClient;
-        this.strategistService = strategistService;
+        this.analyticsService = analyticsService;
     }
 
     @Async
@@ -62,37 +57,25 @@ public class TelegramUpdateService {
             if (message.from() != null && Boolean.TRUE.equals(message.from().bot())) {
                 return;
             }
-            IncomingCommand command = parseCommand(message);
-            if (command == null) {
+            String input = extractInput(message);
+            if (input == null) {
                 return;
             }
-
-            if (command.type() == CommandType.PING) {
-                reply(message, PING_REPLY);
-            } else if (command.type() == CommandType.RESET) {
-                strategistService.reset(message.chat().id(), message.messageThreadId());
-                reply(message, "Memoria di Chewbecca-Strategist azzerata per questo topic ✅");
-            } else {
-                replyFromStrategist(message, command.prompt());
-            }
+            replyFromAnalytics(message, input);
         } catch (RuntimeException ex) {
             processedUpdates.invalidate(update.updateId());
             log.error("Elaborazione update Telegram non riuscita: updateId={}", update.updateId(), ex);
         }
     }
 
-    private void replyFromStrategist(TelegramMessage message, String prompt) {
+    private void replyFromAnalytics(TelegramMessage message, String input) {
         try {
-            String author = author(message);
-            String answer = strategistService.reply(
-                    message.chat().id(),
-                    message.messageThreadId(),
-                    author,
-                    prompt
-            );
+            String answer = analyticsService.answer(input, properties.normalizedBotUsername());
             reply(message, answer);
-        } catch (OpenAiApiException | AssistantUnavailableException ex) {
-            reply(message, "Non riesco a contattare Chewbecca-Strategist: " + ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.warn("Comando analytics Telegram non riuscito: tipo={}", ex.getClass().getSimpleName());
+            reply(message, "Non riesco a recuperare i dati analytics in questo momento. "
+                    + "Controlla il collegamento YouTube e riprova.");
         }
     }
 
@@ -105,55 +88,44 @@ public class TelegramUpdateService {
         );
     }
 
-    private IncomingCommand parseCommand(TelegramMessage message) {
+    private String extractInput(TelegramMessage message) {
         if (!StringUtils.hasText(message.text())) {
             return null;
         }
 
         String original = message.text().trim();
         String text = original.toLowerCase(Locale.ROOT);
-        if (text.equals("ping") || text.equals("/ping") || commandForThisBot(text, "/ping@")) {
-            return new IncomingCommand(CommandType.PING, null);
-        }
-        if (text.equals("/reset") || commandForThisBot(text, "/reset@")) {
-            return new IncomingCommand(CommandType.RESET, null);
-        }
-
-        String slashPrompt = promptAfterAskCommand(original);
-        if (slashPrompt != null) {
-            return slashPrompt.isBlank() ? null : new IncomingCommand(CommandType.PROMPT, slashPrompt);
+        if (original.startsWith("/")) {
+            int separator = original.indexOf(' ');
+            String commandToken = separator < 0 ? original : original.substring(0, separator);
+            int mentionSeparator = commandToken.indexOf('@');
+            if (mentionSeparator >= 0) {
+                String recipient = commandToken.substring(mentionSeparator + 1);
+                if (!matchesConfiguredUsername(recipient)) {
+                    return null;
+                }
+                String canonicalCommand = commandToken.substring(0, mentionSeparator);
+                return separator < 0
+                        ? canonicalCommand
+                        : canonicalCommand + original.substring(separator);
+            }
+            return original;
         }
 
         String mention = "@" + properties.normalizedBotUsername();
         if (!properties.normalizedBotUsername().isBlank() && text.startsWith(mention)) {
             String prompt = original.substring(mention.length()).trim();
-            return prompt.isBlank() ? null : new IncomingCommand(CommandType.PROMPT, prompt);
+            return prompt.isBlank() ? "/help" : prompt;
         }
 
         if (isReplyToBot(message)) {
-            return new IncomingCommand(CommandType.PROMPT, original);
+            return original;
         }
 
+        if (text.equals("ping")) {
+            return "ping";
+        }
         return null;
-    }
-
-    private String promptAfterAskCommand(String original) {
-        int separator = original.indexOf(' ');
-        String command = separator < 0 ? original : original.substring(0, separator);
-        String normalizedCommand = command.toLowerCase(Locale.ROOT);
-        if (!normalizedCommand.equals("/ask")
-                && !(normalizedCommand.startsWith("/ask@")
-                && matchesConfiguredUsername(normalizedCommand.substring("/ask@".length())))) {
-            return null;
-        }
-        return separator < 0 ? "" : original.substring(separator + 1).trim();
-    }
-
-    private boolean commandForThisBot(String text, String prefix) {
-        if (!text.startsWith(prefix)) {
-            return false;
-        }
-        return matchesConfiguredUsername(text.substring(prefix.length()));
     }
 
     private boolean matchesConfiguredUsername(String candidate) {
@@ -169,23 +141,4 @@ public class TelegramUpdateService {
                 && matchesConfiguredUsername(repliedTo.from().username());
     }
 
-    private String author(TelegramMessage message) {
-        if (message.from() == null) {
-            return "membro del team";
-        }
-        if (StringUtils.hasText(message.from().username())) {
-            return "@" + message.from().username();
-        }
-        if (StringUtils.hasText(message.from().firstName())) {
-            return message.from().firstName();
-        }
-        return "utente Telegram " + message.from().id();
-    }
-
-    private enum CommandType {
-        PING, RESET, PROMPT
-    }
-
-    private record IncomingCommand(CommandType type, String prompt) {
-    }
 }

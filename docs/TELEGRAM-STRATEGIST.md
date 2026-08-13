@@ -1,170 +1,132 @@
-# Chewbecca-Strategist su Telegram
+# Bot analytics Telegram senza AI
 
-Questa integrazione porta nel gruppo Telegram il comportamento analitico di
-Chewbecca-Strategist. Non invoca direttamente il GPT creato nel Builder di
-ChatGPT: usa un modello OpenAI via Responses API, le stesse istruzioni
-strategiche e le 44 Actions dichiarate in `openapi-gpt.yaml`.
+Il bot Telegram interroga direttamente i servizi YouTube già presenti
+nell'applicazione Spring Boot. Non invia prompt o dati a OpenAI, non usa modelli
+generativi e non genera costi per token AI.
 
-Il modello può scegliere ed eseguire più Actions nella stessa richiesta,
-incrociare i risultati e produrre una risposta finale. Per esempio, può
-confrontare views e ricavi, video e Short, intervalli diversi o dati YouTube e
-Meta, rispettando i limiti di confrontabilità indicati nelle istruzioni.
+Il funzionamento è deterministico:
 
-## Architettura
-
-```text
+~~~text
 topic Telegram
   -> webhook Spring Boot su Render
-  -> OpenAI Responses API
-  -> una o più Actions /api/v1/**
-  -> Google YouTube / Meta
-  -> analisi finale nello stesso topic
+  -> riconoscimento del comando o della frase
+  -> servizi Java YouTube Analytics
+  -> calcoli e formattazione Java
+  -> risposta nello stesso topic
+~~~
 
-Neon conserva l'ID della conversazione OpenAI per ogni coppia gruppo + topic.
-```
+Il GPT Chewbecca-Strategist configurato in ChatGPT continua a utilizzare le
+Actions esistenti e non viene modificato da questa integrazione.
 
-Le API analytics restano protette da `GPT_ACTION_API_KEY`. Quando il modello
-richiede una Action, l'applicazione la richiama internamente su localhost e
-allega automaticamente il Bearer token: la chiave non viene mai mostrata a
-OpenAI o Telegram.
+## Comandi
 
-## 1. Creare e aggiungere il bot
+| Comando | Risultato |
+|---|---|
+| /ping | Verifica bot e webhook |
+| /help o /comandi | Mostra i comandi disponibili |
+| /topvideo [inizio fine] | Top 10 video per views |
+| /topshort [inizio fine] | Top 10 Short per views |
+| /adesso | Ultimi 28 giorni completi contro i 28 precedenti |
+| /trimestre | Ultimi 3 mesi completi contro i 3 precedenti |
+| /guadagni30 | Ricavi stimati degli ultimi 30 giorni completi |
+| /ripartenze | Confronta le finestre successive alle ripartenze configurate |
+| /confrontomese YYYY-MM | Ultimo mese completo contro un mese scelto |
+| /confrontoanno YYYY | Anno corrente contro lo stesso intervallo dell'anno scelto |
+| /ultimovideo | Ultimo long video contro i 10 precedenti alla stessa età |
 
-In BotFather crea il bot e annota:
+Nei comandi rivolti al gruppo è consigliato aggiungere lo username:
 
-- il token;
-- lo username reale, che deve terminare con `bot`, per esempio
-  `chewbecca_strategist_bot`.
+~~~text
+/topvideo@chewbecca_strategist_bot
+/confrontomese@chewbecca_strategist_bot 2025-09
+~~~
 
-Il nome visualizzato può essere `Chewbecca-Strategist`, ma non sostituisce lo
-username. Aggiungi il bot al supergruppo con i topic.
+Il bot riconosce anche alcune frasi quando viene menzionato:
 
-La privacy mode può restare attiva. Il modo più affidabile per iniziare una
-domanda è il comando esplicitamente indirizzato al bot:
+~~~text
+@chewbecca_strategist_bot dimmi i top video
+@chewbecca_strategist_bot dimmi i top Short
+@chewbecca_strategist_bot come sta andando il canale?
+@chewbecca_strategist_bot confronta gli ultimi 3 mesi con i precedenti
+@chewbecca_strategist_bot quanto abbiamo guadagnato negli ultimi 30 giorni?
+@chewbecca_strategist_bot come sta andando l'ultimo video rispetto agli altri?
+~~~
 
-```text
-/ask@chewbecca_strategist_bot Incrocia views e ricavi degli ultimi 28 giorni
-```
+Non è un interprete linguistico generale: le varianti riconosciute sono regole
+esplicite nel codice.
 
-Dopo la prima risposta, il team può anche rispondere direttamente ai messaggi
-del bot. È supportata anche la menzione
-`@chewbecca_strategist_bot domanda`, se Telegram la consegna con le impostazioni
-del gruppo.
+## Endpoint dei comandi
 
-## 2. Recuperare il chat ID
+L'elenco utilizzato anche da /help è esposto in JSON:
 
-Questa operazione va eseguita prima di configurare il webhook:
+~~~text
+GET /api/integrations/telegram/commands
+~~~
 
-1. aggiungere il bot al gruppo;
-2. inviare `/ping@chewbecca_strategist_bot` in un topic;
-3. dalla propria macchina chiamare `getUpdates` e leggere `message.chat.id`.
+La risposta dichiara esplicitamente:
 
-```bash
-export TELEGRAM_BOT_TOKEN='...'
-curl --silent "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
-```
+~~~json
+{
+  "mode": "DETERMINISTIC_NO_AI",
+  "usesArtificialIntelligence": false
+}
+~~~
 
-Il chat ID di un supergruppo è negativo e normalmente inizia con `-100`.
-Conservarlo integralmente. Non condividere mai il bot token.
+Seguono descrizione, sintassi ed esempi di tutti i comandi implementati.
 
-## 3. Variabili su Render
+## Significato dei confronti
 
-Mantenere tutte le variabili già presenti per Google, Meta, Neon e sicurezza,
-in particolare `GPT_ACTION_API_KEY`. Aggiungere:
+- /adesso: ultimi 28 giorni completi contro i 28 immediatamente precedenti.
+- /trimestre: ultimi tre mesi di calendario completi contro i tre precedenti.
+- /confrontomese: ultimo mese di calendario completo contro il mese indicato.
+- /confrontoanno: dal 1° gennaio all'ultimo giorno completo disponibile,
+  confrontato con lo stesso intervallo dell'anno richiesto.
+- /ultimovideo: usa l'ultimo contenuto classificato VIDEO, esclude gli Short e
+  confronta views, ore, percentuale media vista e iscritti netti con la media
+  dei dieci video precedenti. Ogni video è misurato sullo stesso numero di
+  giorni completi dalla propria pubblicazione.
 
-```dotenv
+Le differenze assolute, percentuali, medie e posizioni sono calcolate in Java.
+
+## Configurare le ripartenze
+
+Per /ripartenze aggiungere su Render:
+
+~~~dotenv
+CHANNEL_RESTART_DATES=Nome 1|2024-09-01,Nome 2|2025-02-15
+CHANNEL_RESTART_WINDOW_DAYS=30
+~~~
+
+Ogni voce contiene etichetta e data separate da |. Il bot confronta i primi
+30 giorni dopo ciascuna data, oppure la finestra configurata. Sono necessarie
+almeno due ripartenze.
+
+## Variabili Render
+
+~~~dotenv
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_BOT_USERNAME=chewbecca_strategist_bot
 TELEGRAM_WEBHOOK_SECRET=...
-TELEGRAM_ALLOWED_CHAT_ID=-100...
+TELEGRAM_ALLOWED_CHAT_ID=-1001947350438
 
-ASSISTANT_ENABLED=true
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.6-luna
-OPENAI_MAX_OUTPUT_TOKENS=3000
-OPENAI_MAX_TOOL_ROUNDS=6
-```
+ASSISTANT_ENABLED=false
+~~~
 
-Generare il secret Telegram, per esempio con:
+OPENAI_API_KEY non è necessaria. Le configurazioni Google, Neon e
+GPT_ACTION_API_KEY restano invariate.
 
-```bash
-openssl rand -hex 32
-```
+Il webhook è:
 
-`TELEGRAM_WEBHOOK_SECRET` deve contenere 16-256 caratteri fra lettere, numeri,
-`_` e `-`.
-
-Lasciare vuota `ASSISTANT_ACTIONS_BASE_URL`: su Render il bot richiamerà le
-Actions della stessa applicazione su localhost. Impostarla solo se le Actions
-vengono spostate su un servizio differente.
-
-L'uso del modello tramite API è fatturato separatamente dall'abbonamento
-ChatGPT. Il costo dipende dai token delle domande, delle risposte e dei dati
-restituiti dalle Actions.
-
-## 4. Database Neon
-
-Al deploy Flyway esegue automaticamente:
-
-```text
-V3__create_telegram_conversations.sql
-```
-
-La tabella `telegram_conversations` conserva soltanto il riferimento alla
-conversazione OpenAI per ogni `(telegram_chat_id, telegram_thread_id)`. Non è
-necessario eseguire SQL manuale. Ogni topic ha quindi una memoria distinta.
-
-## 5. Registrare il webhook
-
-Dopo che il nuovo deploy è healthy:
-
-```bash
-export TELEGRAM_BOT_TOKEN='...'
-export TELEGRAM_WEBHOOK_SECRET='...'
-./scripts/configure-telegram-webhook.sh https://youtube-analytics-api.onrender.com
-```
-
-Usare il dominio Render effettivo. Il dominio standard termina con
-`.onrender.com`, non `.onrrender.com`.
-
-Lo script registra:
-
-```text
+~~~text
 POST /api/integrations/telegram/webhook
-```
+~~~
 
-Telegram invia nell'header `X-Telegram-Bot-Api-Secret-Token` il secret
-configurato. Richieste senza il valore corretto vengono respinte.
+## Verifica
 
-## 6. Test nel gruppo
-
-Eseguire nello stesso topic:
-
-```text
-/ping@chewbecca_strategist_bot
-/ask@chewbecca_strategist_bot Quali Short stanno rendendo meglio e perché?
-/ask@chewbecca_strategist_bot Ora confrontali con il periodo precedente
-/reset@chewbecca_strategist_bot
-```
-
-Risultati attesi:
-
-- `/ping` risponde `Bot attivo`;
-- `/ask` può attivare una o più Actions e risponde nello stesso topic;
-- la seconda domanda usa il contesto della prima;
-- `/reset` cancella soltanto la memoria del topic corrente.
-
-Le risposte oltre il limite Telegram vengono divise in più messaggi. Gli update
-duplicati vengono ignorati per un'ora. I messaggi provenienti da gruppi diversi
-da `TELEGRAM_ALLOWED_CHAT_ID` non vengono elaborati.
-
-## 7. Verifica locale
-
-```bash
+~~~bash
 ./mvnw test
-```
+~~~
 
-I test coprono autenticazione del webhook, routing per topic, comandi,
-deduplicazione, trasformazione delle 44 Actions e il ciclo
-modello -> Action -> analisi finale.
+I test coprono sicurezza del webhook, topic Telegram, deduplicazione, catalogo
+dei comandi, riconoscimento delle frasi e calcolo degli intervalli.
