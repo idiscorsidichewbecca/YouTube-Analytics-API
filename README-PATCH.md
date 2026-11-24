@@ -1,26 +1,40 @@
-# Chewbecca Studio — fix diagnostica download MP4 per MCP
+# Chewbecca Studio — Fix definitivo per host regionali OpenAI
 
-**Base verificata:** GitHub `idiscorsidichewbecca/YouTube-Analytics-API`, commit `0ab49567e9de9416bbcac600edb0ac370299bdc7` del 24 novembre 2026.
+## Contesto
+La versione di partenza corrisponde al commit Render/GitHub `d3fa796`.
+Il caricamento MP4 risultava bloccato da `HOST_NOT_ALLOWED` perché ChatGPT ha fornito
+host regionali differenti, per esempio `sdmntprdenmarkeast.oaiusercontent.com` e
+`sdmntprpolandcentral.oaiusercontent.com`.
 
-## Contenuto
+## Cosa cambia
+- `OpenAiFileDownloadService.java`: oltre agli hostname esatti configurati,
+  consente gli host di un solo livello che rispettano il pattern
+  `sdmntpr...oaiusercontent.com`, riconoscendo dinamicamente le regioni.
+- La regola NON è un wildcard generico `*.oaiusercontent.com`.
+- Rimangono obbligatori HTTPS, porta 443 (o default), assenza di userinfo/fragment,
+  redirect HTTP bloccati, limite 300 MiB e verifica della firma MP4.
+- `OpenAiFileDownloadServiceTest.java`: test aggiuntivi per regioni nuove,
+  host imitatori, HTTP, credenziali nell'URL, porta non standard e fragment.
+- `MODIFICHE.diff`: diff unificato della patch rispetto ai file correnti.
 
-- `src/main/java/it/chewbecca/youtubeanalytics/chatgpt/OpenAiFileDownloadService.java`: classifica gli errori di file, host, HTTP, redirect, rete, dimensioni e MP4. Log strutturati `MCP_FILE_DOWNLOAD_FAILED`, senza URL temporanei, query string, file ID o token. Mantiene allowlist esatta e redirect vietati.
-- `src/main/java/it/chewbecca/youtubeanalytics/mcp/ChewbeccaMcpPublishingTools.java`: risultato MCP esplicito `DOWNLOAD_FAILED ... uploadStarted=false`, descrizione dello strumento che invita a fermarsi anziché usare browser/YouTube Studio; conserva la conferma esplicita dell'utente e lo scope OAuth di scrittura.
-- Test JUnit per host consentiti/vietati, HTTPS, file ID e descrizione del tool.
+## Installazione
+1. Estrarre questo ZIP nella RADICE del repository
+   `idiscorsidichewbecca/YouTube-Analytics-API`, mantenendo i percorsi.
+2. Sostituire solo i due `.java` presenti nello ZIP. Non sovrascrivere altri file.
+3. Eseguire `./mvnw test`, poi commit e push su `main`.
+4. Attendere il deploy Render `Live`, poi riprovare una NUOVA bozza da ChatGPT.
 
-## Applicazione
+## Configurazione Render
+Non è più necessario aggiungere gli hostname regionali uno per uno a
+`CHATGPT_FILE_ALLOWED_HOSTS`. Può restare impostata sui domini esatti già
+utilizzati (per esempio `files.oaiusercontent.com,files.openai.com`).
+NON inserire `*` o domini non verificati nella variabile.
 
-Estrai questo ZIP nella **radice del repository** mantenendo i percorsi e sovrascrivendo i tre file Java esistenti. Il file test `OpenAiFileDownloadServiceTest.java` è nuovo. Non sovrascrivere o modificare `pom.xml`, `application.yml`, token e variabili Render.
-
-```bash
-./mvnw clean test
-./mvnw package -DskipTests
-```
-
-Se i test passano, commit/push sul branch `main` per il deploy Render.
-
-## Prossimo test
-
-Apri una nuova chat con il plugin aggiornato, allega un MP4 di test e prepara una **nuova bozza**. Prima di qualsiasi nuovo tentativo di upload, verifica lo stato della bozza precedente e YouTube, perché un upload fallito dopo l'avvio può avere esito incerto. Se ricevi `DOWNLOAD_FAILED`, controlla in Render la stringa `MCP_FILE_DOWNLOAD_FAILED`. Se è `HOST_NOT_ALLOWED`, considera solo l'hostname effettivo, mai l'URL con firma o token, e aggiorna eventualmente `CHATGPT_FILE_ALLOWED_HOSTS` con un host HTTPS OpenAI ufficiale verificato. Se è `REDIRECT_BLOCKED`, non sbloccare redirect indiscriminati.
-
-Il testo del tool scoraggia YouTube Studio ma **non può disabilitare tecnicamente gli altri strumenti della chat**. Non è stato effettuato un upload YouTube reale e questa patch non è stata compilata automaticamente nel presente ambiente; i test vanno eseguiti nel repository.
+## Limitazioni e sicurezza
+Questo fix copre i domini regionali con prefisso `sdmntpr` osservati nei log.
+Se OpenAI cambia il proprio schema di hostname, la policy deve essere rivista:
+non è sicuro aprire indiscriminatamente tutti gli host HTTPS.
+Non elimina eventuali problemi successivi con download scaduti, Google OAuth,
+quota YouTube o video upload. Non è stato eseguito un upload reale.
+La nuova logica NON apre YouTube Studio e non richiede nuovi login Google.
+I test JUnit vanno eseguiti nel repository prima della pubblicazione.

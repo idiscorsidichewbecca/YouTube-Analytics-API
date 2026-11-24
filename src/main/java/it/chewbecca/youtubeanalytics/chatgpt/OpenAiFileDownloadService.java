@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Scarica allegati MP4 da host HTTPS esplicitamente autorizzati.
@@ -26,6 +27,16 @@ import java.util.Locale;
 public class OpenAiFileDownloadService {
     private static final Logger log = LoggerFactory.getLogger(OpenAiFileDownloadService.class);
     static final long MAX_FILE_BYTES = 300L * 1024 * 1024;
+
+    /**
+     * Gli allegati ChatGPT possono provenire da host regionali OpenAI come
+     * sdmntprdenmarkeast.oaiusercontent.com o sdmntprpolandcentral.oaiusercontent.com.
+     * Si accetta SOLO un singolo hostname con prefisso sdmntpr sotto oaiusercontent.com:
+     * non un generico wildcard *.oaiusercontent.com e non domini con suffissi imitati.
+     */
+    private static final Pattern OPENAI_REGIONAL_FILE_HOST = Pattern.compile(
+            "sdmntpr[a-z0-9](?:[a-z0-9-]{0,53}[a-z0-9])?\\.oaiusercontent\\.com",
+            Pattern.CASE_INSENSITIVE);
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build();
     private final ChatGptBridgeProperties settings;
@@ -78,8 +89,11 @@ public class OpenAiFileDownloadService {
                 (uri.getPort() != -1 && uri.getPort() != 443) || uri.getFragment() != null) {
             throw error(DownloadError.INVALID_URL, "L'allegato richiede un URL HTTPS valido");
         }
-        boolean allowed = settings.allowedFileHosts().stream()
-                .anyMatch(h -> h != null && host.equalsIgnoreCase(h.trim()));
+        // Host esatti configurati + sottodomini regionali OpenAI con pattern rigoroso.
+        // Il controllo è sul valore URI.getHost(), non sul testo dell'URL.
+        boolean allowed = OPENAI_REGIONAL_FILE_HOST.matcher(host).matches() ||
+                settings.allowedFileHosts().stream()
+                        .anyMatch(h -> h != null && host.equalsIgnoreCase(h.trim()));
         if (!allowed) {
             // Host passato come argomento strutturato, mai URL completo / query string.
             log.warn("MCP_FILE_DOWNLOAD_FAILED code={} host={} uploadStarted=false", DownloadError.HOST_NOT_ALLOWED, host);

@@ -19,6 +19,45 @@ class OpenAiFileDownloadServiceTest {
                 .getHost()).isEqualTo("files.oaiusercontent.com");
     }
 
+    @Test void allowsRegionalOpenAiHostsWithoutEnvironmentUpdates() {
+        assertThat(service.validate(input(
+                "https://sdmntprdenmarkeast.oaiusercontent.com/video.mp4?sig=hidden"))
+                .getHost()).isEqualTo("sdmntprdenmarkeast.oaiusercontent.com");
+        assertThat(service.validate(input(
+                "https://sdmntprpolandcentral.oaiusercontent.com/video.mp4"))
+                .getHost()).isEqualTo("sdmntprpolandcentral.oaiusercontent.com");
+        assertThat(service.validate(input(
+                "https://sdmntprjapanwest.oaiusercontent.com/video.mp4"))
+                .getHost()).isEqualTo("sdmntprjapanwest.oaiusercontent.com");
+    }
+
+    @Test void rejectsOpenAiHostnameSpoofingAndUnrelatedSubdomains() {
+        for (String host : List.of(
+                "sdmntprpolandcentral.oaiusercontent.com.evil.example",
+                "sdmntprpolandcentral.evil.oaiusercontent.com",
+                "notregional.oaiusercontent.com",
+                "oaiusercontent.com",
+                "sdmntprpolandcentral.oaiusercontent.com.evil.com")) {
+            assertThatThrownBy(() -> service.validate(input("https://" + host + "/video.mp4")))
+                    .as("Host should be blocked: %s", host)
+                    .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                    .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.HOST_NOT_ALLOWED);
+        }
+    }
+
+    @Test void rejectsUnsafeRegionalHostUrls() {
+        for (String url : List.of(
+                "http://sdmntprdenmarkeast.oaiusercontent.com/video.mp4",
+                "https://attacker:password@sdmntprdenmarkeast.oaiusercontent.com/video.mp4",
+                "https://sdmntprdenmarkeast.oaiusercontent.com:8443/video.mp4",
+                "https://sdmntprdenmarkeast.oaiusercontent.com/video.mp4#fragment")) {
+            assertThatThrownBy(() -> service.validate(input(url)))
+                    .as("Unsafe URL should be blocked")
+                    .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                    .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_URL);
+        }
+    }
+
     @Test void rejectsLookalikeHostname() {
         assertThatThrownBy(() -> service.validate(input("https://files.oaiusercontent.com.attacker.org/video.mp4")))
                 .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
