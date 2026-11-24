@@ -1,0 +1,160 @@
+package it.chewbecca.youtubeanalytics.mcp;
+
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPublicKey;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.authorization.web.OAuth2AuthorizationEndpointFilter;
+import org.springframework.web.filter.OncePerRequestFilter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+/** OAuth2 Authorization Server + JWT resource server: client pre-registrato, PKCE obbligatorio. */
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(name = "app.mcp.enabled", havingValue = "true")
+public class ChewbeccaMcpOAuthConfig {
+
+    @Bean
+    @Order(1)
+    SecurityFilterChain authorizationServerChain(HttpSecurity http,
+        @Value("${app.mcp.public-url}") String base) throws Exception {
+        OAuth2AuthorizationServerConfigurer as = OAuth2AuthorizationServerConfigurer.authorizationServer();
+        http.securityMatcher(as.getEndpointsMatcher())
+            .with(as, Customizer.withDefaults())
+            .authorizeHttpRequests(a -> a.anyRequest().authenticated())
+            .exceptionHandling(e -> e.authenticationEntryPoint(new LoginUrlAuthenticationEntryPoint("/login")))
+            .csrf(csrf -> csrf.ignoringRequestMatchers(as.getEndpointsMatcher()));
+        // Una sola audience consentita: il parametro RFC 8707 deve corrispondere alla risorsa MCP.
+        String resource = base.replaceAll("/+$", "") + "/mcp";
+        http.addFilterBefore(new OncePerRequestFilter() {
+            @Override
+            protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                    FilterChain chain) throws ServletException, IOException {
+                String path = request.getRequestURI();
+                if ((path.equals("/oauth2/authorize") || path.equals("/oauth2/token"))
+                        && !resource.equals(request.getParameter("resource"))) {
+                    response.sendError(400, "Invalid OAuth resource");
+                    return;
+                }
+                chain.doFilter(request, response);
+            }
+        }, OAuth2AuthorizationEndpointFilter.class);
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
+    SecurityFilterChain mcpResourceChain(HttpSecurity http,
+                                         @Value("${app.mcp.public-url}") String base) throws Exception {
+        String metadata = base.replaceAll("/+$", "") + "/.well-known/oauth-protected-resource";
+        return http.securityMatcher("/mcp", "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp")
+            .authorizeHttpRequests(a -> a
+                .requestMatchers("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp").permitAll()
+                .anyRequest().hasAuthority("SCOPE_shorts:read"))
+            .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()))
+            .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
+                res.setStatus(401);
+                res.setHeader("WWW-Authenticate", "Bearer resource_metadata=\"" + metadata + "\", scope=\"shorts:read\"");
+            }))
+            .csrf(csrf -> csrf.disable())
+            .build();
+    }
+
+    @Bean
+    RegisteredClientRepository registeredClientRepository(@Value("${app.mcp.redirect-uri}") String redirect) {
+        RegisteredClient client = RegisteredClient.withId(UUID.nameUUIDFromBytes("chewbecca-chatgpt".getBytes()).toString())
+            .clientId("chewbecca-chatgpt")
+            .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+            .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+            .redirectUri(redirect)
+            .scope("shorts:read")
+            .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(true).build())
+            .tokenSettings(TokenSettings.builder().accessTokenTimeToLive(Duration.ofMinutes(30)).build())
+            .build();
+        return new InMemoryRegisteredClientRepository(client);
+    }
+
+    @Bean
+    AuthorizationServerSettings authorizationServerSettings(@Value("${app.mcp.public-url}") String base) {
+        if (!base.startsWith("https://")) throw new IllegalStateException("MCP_PUBLIC_URL deve essere HTTPS");
+        return AuthorizationServerSettings.builder().issuer(base.replaceAll("/+$", "")).build();
+    }
+
+    @Bean
+    KeyPair mcpSigningKeyPair() throws Exception {
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
+        g.initialize(3072);
+        return g.generateKeyPair();
+    }
+
+    @Bean
+    JWKSource<SecurityContext> jwkSource(KeyPair mcpSigningKeyPair) {
+        RSAKey rsa = new RSAKey.Builder((RSAPublicKey) mcpSigningKeyPair.getPublic())
+            .privateKey(mcpSigningKeyPair.getPrivate())
+            .keyID(UUID.randomUUID().toString()).build();
+        JWKSet jwkSet = new JWKSet(rsa);
+        return (selector, context) -> selector.select(jwkSet);
+    }
+
+    @Bean
+    JwtDecoder jwtDecoder(JWKSource<SecurityContext> jwkSource, KeyPair mcpSigningKeyPair,
+                          @Value("${app.mcp.public-url}") String base) {
+        String issuer = base.replaceAll("/+$", "");
+        String audience = issuer + "/mcp";
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey((RSAPublicKey) mcpSigningKeyPair.getPublic()).build();
+        var defaults = JwtValidators.createDefaultWithIssuer(issuer);
+        decoder.setJwtValidator(jwt -> {
+            var result = defaults.validate(jwt);
+            if (result.hasErrors()) return result;
+            return jwt.getAudience().contains(audience) ? OAuth2TokenValidatorResult.success()
+                : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "MCP audience non valida", null));
+        });
+        return decoder;
+    }
+
+    @Bean
+    OAuth2TokenCustomizer<JwtEncodingContext> mcpTokenCustomizer(@Value("${app.mcp.public-url}") String base) {
+        String audience = base.replaceAll("/+$", "") + "/mcp";
+        return context -> {
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
+                context.getClaims().audience(List.of(audience));
+            }
+        };
+    }
+}

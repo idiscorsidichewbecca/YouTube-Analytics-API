@@ -112,3 +112,16 @@ app:
 logging:
   level:
     it.chewbecca.youtubeanalytics: INFO
+
+# MCP diretto: separato dal bridge Sites e da OAuth Google/YouTube.
+# Non abilitarlo fino a review e test dell'autorizzazione end-to-end.
+spring.ai.mcp.server.enabled: ${MCP_ENABLED:false}
+spring.ai.mcp.server.protocol: STATELESS
+spring.ai.mcp.server.name: chewbecca-studio
+spring.ai.mcp.server.version: 1.0.0
+spring.ai.mcp.server.type: SYNC
+spring.ai.mcp.server.streamable-http.mcp-endpoint: /mcp
+
+app.mcp.enabled: ${MCP_ENABLED:false}
+app.mcp.public-url: ${MCP_PUBLIC_URL:}
+app.mcp.redirect-uri: ${MCP_REDIRECT_URI:https://chatgpt.com/connector_platform_oauth_redirect}

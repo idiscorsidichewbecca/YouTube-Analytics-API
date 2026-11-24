@@ -3,6 +3,8 @@ package it.chewbecca.youtubeanalytics.config;
 import it.chewbecca.youtubeanalytics.security.ApiKeyAuthenticationFilter;
 import it.chewbecca.youtubeanalytics.chatgpt.ChatGptBridgeAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.annotation.Order;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -43,9 +45,15 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Order(3)
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                             ApiKeyAuthenticationFilter apiKeyAuthenticationFilter,
-                                            ChatGptBridgeAuthenticationFilter chatGptBridgeAuthenticationFilter) throws Exception {
+                                            ChatGptBridgeAuthenticationFilter chatGptBridgeAuthenticationFilter,
+                                            @Value("${app.mcp.enabled:false}") boolean mcpEnabled) throws Exception {
+        if (mcpEnabled) {
+            // Il flusso authorization_code deve consentire al solo admin di effettuare login.
+            http.formLogin(Customizer.withDefaults());
+        }
         return http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
