@@ -32,7 +32,7 @@ public class YouTubePublicationCalendar {
      * viene usato solo per contenuti gia' pubblici o non in elenco.
      * Un errore API interrompe il piano (fail closed), non presume che il calendario sia vuoto.
      */
-    public List<Publication> between(Instant from, Instant to) {
+    public List<Publication> between(Instant from, Instant until) {
         String accessToken = tokens.getValidAccessToken();
         String uploads = tokens.requireCredential().getUploadsPlaylistId();
         if (uploads == null || uploads.isBlank()) {
@@ -72,7 +72,7 @@ public class YouTubePublicationCalendar {
                 if (!scheduled && !"private".equals(status.path("privacyStatus").asText(""))) {
                     at = parse(item.path("snippet").path("publishedAt").asText(null));
                 }
-                if (at != null && !at.isBefore(from) && !at.isAfter(to)) {
+                if (at != null && !at.isBefore(from) && at.isBefore(until)) {
                     events.add(new Publication(item.path("id").asText(),
                             item.path("snippet").path("title").asText(""), at, scheduled));
                 }

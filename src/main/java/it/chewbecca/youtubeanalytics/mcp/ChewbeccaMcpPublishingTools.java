@@ -189,7 +189,7 @@ public class ChewbeccaMcpPublishingTools {
                         AZIONE DI SCRITTURA REALE su YouTube. Richiede consenso ESPLICITO
                         dell'utente dopo anteprima di titolo, descrizione, madeForKids e
                         data/ora. Carica MP4 allegato come privato con publishAt.
-                        Richiede shorts:write. Per le bozze settimanali controlla il calendario
+                        Richiede shorts:write. Per le bozze settimanali ricontrolla l'intera giornata italiana
                         e richiede lo scope Google youtube.force-ssl per la playlist Lo sapevi?.
                         Per la settimana corrente usa prima chewbecca_plan_weekly_short,
                         poi prepara la bozza con weekly_plan=true e l'orario proposto.

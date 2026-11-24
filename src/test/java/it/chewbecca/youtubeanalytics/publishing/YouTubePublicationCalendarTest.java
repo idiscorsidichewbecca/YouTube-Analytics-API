@@ -43,7 +43,8 @@ class YouTubePublicationCalendarTest {
                           {"id":"privateDraft","status":{"privacyStatus":"private"},
                            "snippet":{"publishedAt":"2026-11-26T09:00:00Z"}},
                           {"id":"premiere","status":{"privacyStatus":"public"},
-                           "liveStreamingDetails":{"scheduledStartTime":"2026-11-27T18:00:00Z"}}
+                           "liveStreamingDetails":{"scheduledStartTime":"2026-11-27T18:00:00Z"}},
+                          {"id":"nextDay","status":{"privacyStatus":"private","publishAt":"2026-11-28T00:00:00Z"}}
                         ]}
                         """, MediaType.APPLICATION_JSON));
 

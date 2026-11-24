@@ -11,13 +11,13 @@ import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
+import java.util.function.ToDoubleFunction;
 
 /** Piano non in cache: storico quattro mesi e calendario YouTube aggiornato a ogni richiesta. */
 @Service
 public class WeeklyShortPlanner {
     public static final ZoneId ROME = ZoneId.of("Europe/Rome");
     private static final ZoneId ANALYTICS = ZoneId.of("America/Los_Angeles");
-    private static final Duration BUFFER = Duration.ofHours(3);
     private static final int MAX_SAMPLES = 150;
 
     private final YoutubeCatalogService catalog;
@@ -41,9 +41,28 @@ public class WeeklyShortPlanner {
     public WeekPlan plan() {
         Instant now = clock.instant();
         Instant from = now.plus(2, ChronoUnit.HOURS);
-        Instant until = weekEnds(now);
-        if (from.isAfter(until)) {
+        Instant until = weekEndExclusive(now);
+        if (!from.isBefore(until)) {
             throw new IllegalStateException("Nessuna fascia oraria utile rimasta nella settimana corrente");
+        }
+
+        LocalDate firstDay = from.atZone(ROME).toLocalDate();
+        List<Instant> busy = occupied(firstDay.atStartOfDay(ROME).toInstant(), until, null);
+        Set<LocalDate> busyDays = new TreeSet<>();
+        for (Instant publication : busy) {
+            busyDays.add(publication.atZone(ROME).toLocalDate());
+        }
+        List<ZonedDateTime> availableTimes = new ArrayList<>();
+        ZonedDateTime candidateTime = from.atZone(ROME).truncatedTo(ChronoUnit.HOURS);
+        while (candidateTime.toInstant().isBefore(from)) candidateTime = candidateTime.plusMinutes(30);
+        while (candidateTime.toInstant().isBefore(until)) {
+            if (!busyDays.contains(candidateTime.toLocalDate())) {
+                availableTimes.add(candidateTime);
+            }
+            candidateTime = candidateTime.plusMinutes(30);
+        }
+        if (availableTimes.isEmpty()) {
+            throw new IllegalStateException("Nessuna giornata libera con orari disponibili entro domenica");
         }
 
         Instant historyStart = now.atZone(ROME).minusMonths(4).toInstant();
@@ -66,30 +85,20 @@ public class WeeklyShortPlanner {
                 history.add(new HistoricalShort(video.videoId(), video.title(), video.publishedAt(), metrics));
             }
         }
+        boolean hasEngagedViews = history.stream().anyMatch(video -> video.metrics().engagedViews() > 0);
         List<ShortPublicationPlanner.HistoryPoint> samples = history.stream()
                 .map(shortVideo -> {
                     var local = shortVideo.publishedAt().atZone(ROME);
                     return new ShortPublicationPlanner.HistoryPoint(local.getDayOfWeek(),
                             local.getHour() + local.getMinute() / 60.0,
-                            performanceScore(shortVideo, history), shortVideo.metrics().views());
+                            performanceScore(shortVideo, history, hasEngagedViews), shortVideo.metrics().views());
                 })
                 .toList();
 
-        List<BusySlot> busy = occupied(from.minus(BUFFER), until.plus(BUFFER), null);
-        List<ShortPublicationPlanner.Slot> candidates = new ArrayList<>();
-        ZonedDateTime t = from.atZone(ROME).truncatedTo(ChronoUnit.HOURS);
-        while (t.toInstant().isBefore(from)) t = t.plusMinutes(30);
-        while (!t.toInstant().isAfter(until)) {
-            if (clear(t.toInstant(), busy)) {
-                candidates.add(new ShortPublicationPlanner.Slot(t.toOffsetDateTime(),
-                        ShortPublicationPlanner.score(t, samples)));
-            }
-            t = t.plusMinutes(30);
-        }
-        if (candidates.isEmpty()) {
-            throw new IllegalStateException("Nessuno slot libero nella settimana corrente: " +
-                    "non forzare sovrapposizioni, modifica settimana o distanza minima");
-        }
+        List<ShortPublicationPlanner.Slot> candidates = new ArrayList<>(availableTimes.stream()
+                .map(time -> new ShortPublicationPlanner.Slot(time.toOffsetDateTime(),
+                        ShortPublicationPlanner.score(time, samples)))
+                .toList());
         candidates.sort(Comparator.comparingDouble(ShortPublicationPlanner.Slot::score).reversed()
                 .thenComparingDouble(s -> Math.abs(s.dateTime().getHour() +
                         s.dateTime().getMinute()/60.0 - 18.5))
@@ -104,27 +113,58 @@ public class WeeklyShortPlanner {
         }
         String methodology = samples.isEmpty()
                 ? "Storico utilizzabile assente. A parità di punteggio hanno precedenza le fasce vicine alle 18:30."
-                : "Primi sette giorni. Il punteggio combina copertura (60%), percentuale media guardata (25%) "
-                        + "e interazioni per visualizzazione (15%). Le fasce con pochi esempi pesano meno.";
+                : "Primi sette giorni. Punteggio con visualizzazioni soprattutto coinvolte (60%), percentuale "
+                        + "media guardata (25%) e interazioni per visualizzazione (15%). Le fasce con pochi esempi "
+                        + "pesano meno. Il dettaglio degli slot conta gli Shorts dello stesso giorno della settimana "
+                        + "pubblicati entro due ore dall'orario proposto.";
         List<HistoricalShort> examples = history.stream()
-                .sorted(Comparator.comparingDouble((HistoricalShort v) -> performanceScore(v, history)).reversed())
+                .sorted(Comparator.comparingDouble((HistoricalShort v) -> performanceScore(v, history, hasEngagedViews)).reversed())
                 .limit(3)
                 .toList();
-        return new WeekPlan(historyStart, now, until, samples.size(), eligible.size() > MAX_SAMPLES,
-                samples.size() >= 20 ? "MEDIA" : "BASSA", BUFFER.toHours(), methodology,
-                alternatives.getFirst(), List.copyOf(alternatives),
-                busy.stream().map(BusySlot::when).distinct().sorted().toList(), examples);
+        List<SlotEvidence> evidence = alternatives.stream()
+                .map(slot -> evidenceFor(slot.dateTime(), history, hasEngagedViews))
+                .toList();
+        return new WeekPlan(historyStart, now, until.minusNanos(1), samples.size(), eligible.size() > MAX_SAMPLES,
+                evidence.getFirst().sampleCount() >= 5 ? "MEDIA" : "BASSA", methodology,
+                alternatives.getFirst(), List.copyOf(alternatives), List.copyOf(busyDays), busy, examples, evidence);
     }
 
-    private static double performanceScore(HistoricalShort video, List<HistoricalShort> history) {
-        return 0.60 * (0.70 * percentile(video, history, s -> s.metrics().views())
-                        + 0.30 * percentile(video, history, HistoricalShort::engagedReach))
+    private static SlotEvidence evidenceFor(OffsetDateTime candidate, List<HistoricalShort> history,
+                                            boolean hasEngagedViews) {
+        List<HistoricalShort> comparable = history.stream().filter(video -> {
+            ZonedDateTime time = video.publishedAt().atZone(ROME);
+            return time.getDayOfWeek() == candidate.getDayOfWeek()
+                    && Duration.between(candidate.toLocalTime(), time.toLocalTime()).abs()
+                            .compareTo(Duration.ofHours(2)) <= 0;
+        }).toList();
+        return new SlotEvidence(candidate, comparable.size(),
+                hasEngagedViews ? median(comparable, video -> video.metrics().engagedViews()) : null,
+                median(comparable, video -> video.metrics().views()),
+                median(comparable, video -> video.metrics().averageViewPercentage()));
+    }
+
+    private static Double median(List<HistoricalShort> history, ToDoubleFunction<HistoricalShort> metric) {
+        double[] sorted = history.stream().mapToDouble(metric).sorted().toArray();
+        if (sorted.length == 0) return null;
+        int upperMiddle = sorted.length / 2;
+        return sorted.length % 2 == 0
+                ? (sorted[upperMiddle - 1] + sorted[upperMiddle]) / 2
+                : sorted[upperMiddle];
+    }
+
+    private static double performanceScore(HistoricalShort video, List<HistoricalShort> history,
+                                           boolean hasEngagedViews) {
+        double views = percentile(video, history, s -> s.metrics().views());
+        double reach = hasEngagedViews
+                ? 0.75 * percentile(video, history, s -> s.metrics().engagedViews()) + 0.25 * views
+                : views;
+        return 0.60 * reach
                 + 0.25 * percentile(video, history, s -> s.metrics().averageViewPercentage())
                 + 0.15 * percentile(video, history, HistoricalShort::interactionRate);
     }
 
     private static double percentile(HistoricalShort video, List<HistoricalShort> history,
-                                     java.util.function.ToDoubleFunction<HistoricalShort> metric) {
+                                     ToDoubleFunction<HistoricalShort> metric) {
         double value = metric.applyAsDouble(video);
         double rank = 0;
         for (HistoricalShort sample : history) {
@@ -136,50 +176,42 @@ public class WeeklyShortPlanner {
     }
 
     static void validateCurrentWeek(Instant when, Instant now) {
-        if (when.isAfter(weekEnds(now))) {
+        if (!when.isBefore(weekEndExclusive(now))) {
             throw new IllegalArgumentException("Scegli un orario entro la domenica della settimana corrente (ora italiana)");
         }
     }
 
-    private static Instant weekEnds(Instant now) {
+    private static Instant weekEndExclusive(Instant now) {
         return now.atZone(ROME).toLocalDate()
-                .with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
-                .atTime(23, 59, 59).atZone(ROME).toInstant();
+                .with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+                .atStartOfDay(ROME).toInstant();
     }
 
-    /** Da richiamare appena prima dell'upload: verificare nuovamente il calendario, mai fidarsi di una bozza vecchia. */
+    /** Rilegge l'intera giornata italiana subito prima dell'upload. */
     public void assertAvailable(Instant proposed, String excludeDraftId) {
-        List<BusySlot> busy = occupied(proposed.minus(BUFFER), proposed.plus(BUFFER), excludeDraftId);
-        if (!clear(proposed, busy)) {
-            throw new IllegalStateException("Orario già occupato da un'altra pubblicazione: " +
-                    "crea una nuova bozza con chewbecca_plan_weekly_short, nessun upload avviato");
+        LocalDate day = proposed.atZone(ROME).toLocalDate();
+        Instant start = day.atStartOfDay(ROME).toInstant();
+        Instant end = day.plusDays(1).atStartOfDay(ROME).toInstant();
+        if (!occupied(start, end, excludeDraftId).isEmpty()) {
+            throw new IllegalStateException("Giornata già occupata: scegli una nuova data con chewbecca_plan_weekly_short");
         }
     }
 
-    private List<BusySlot> occupied(Instant from, Instant to, String excludeDraftId) {
-        List<BusySlot> busy = new ArrayList<>();
-        for (var p : calendar.between(from, to)) {
-            busy.add(new BusySlot(p.publishAt(), "youtube:" + p.videoId()));
+    private List<Instant> occupied(Instant from, Instant until, String excludeDraftId) {
+        List<Instant> busy = new ArrayList<>();
+        for (var publication : calendar.between(from, until)) {
+            busy.add(publication.publishAt());
         }
-        for (var draft : drafts.findByPublishAtBetweenAndStatusNot(from, to, ShortDraft.Status.DRAFT)) {
+        for (var draft : drafts.findReservations(from, until, ShortDraft.Status.DRAFT)) {
             if (!draft.getId().equals(excludeDraftId)) {
-                busy.add(new BusySlot(draft.getPublishAt(), "draft:" + draft.getId()));
+                busy.add(draft.getPublishAt());
             }
         }
-        return List.copyOf(busy);
+        return busy.stream().distinct().sorted().toList();
     }
 
-    static boolean clear(Instant proposed, List<BusySlot> busy) {
-        return busy.stream().noneMatch(b -> Duration.between(proposed, b.when()).abs().compareTo(BUFFER) < 0);
-    }
-
-    public record BusySlot(Instant when, String source) {}
     public record HistoricalShort(String videoId, String title, Instant publishedAt,
                                   YouTubeAnalyticsClient.AnalyticsMetrics metrics) {
-        long engagedReach() {
-            return metrics.engagedViews() > 0 ? metrics.engagedViews() : metrics.views();
-        }
-
         double interactionRate() {
             double interactions = (double) metrics.likes() + metrics.comments() + metrics.shares()
                     + metrics.subscribersGained();
@@ -188,10 +220,13 @@ public class WeeklyShortPlanner {
         }
     }
 
+    public record SlotEvidence(OffsetDateTime dateTime, int sampleCount, Double medianEngagedViews,
+                               Double medianViews, Double medianAveragePercentageViewed) {}
+
     public record WeekPlan(Instant historicalFrom, Instant historicalTo, Instant weekEnds,
                            int videosAnalyzed, boolean historyTruncated, String confidence,
-                           long minGapHours, String methodology,
-                           ShortPublicationPlanner.Slot recommended,
-                           List<ShortPublicationPlanner.Slot> alternatives, List<Instant> occupiedPublicationTimes,
-                           List<HistoricalShort> historicalExamples) {}
+                           String methodology, ShortPublicationPlanner.Slot recommended,
+                           List<ShortPublicationPlanner.Slot> alternatives, List<LocalDate> occupiedDays,
+                           List<Instant> occupiedPublicationTimes,
+                           List<HistoricalShort> historicalExamples, List<SlotEvidence> slotEvidence) {}
 }
