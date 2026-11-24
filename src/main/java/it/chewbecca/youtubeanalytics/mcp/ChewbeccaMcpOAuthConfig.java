@@ -113,6 +113,7 @@ public class ChewbeccaMcpOAuthConfig {
             .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
             .redirectUri(redirect)
             .scope("shorts:read")
+            .scope("shorts:write")
             .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(true).build())
             .tokenSettings(TokenSettings.builder().accessTokenTimeToLive(Duration.ofMinutes(30)).build())
             .build();

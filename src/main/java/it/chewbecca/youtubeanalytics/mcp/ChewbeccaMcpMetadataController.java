@@ -22,7 +22,7 @@ public class ChewbeccaMcpMetadataController {
         return Map.of(
           "resource", resource,
           "authorization_servers", List.of(issuer),
-          "scopes_supported", List.of("shorts:read"),
+          "scopes_supported", List.of("shorts:read", "shorts:write"),
           "bearer_methods_supported", List.of("header")
         );
     }

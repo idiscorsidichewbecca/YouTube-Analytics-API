@@ -9,10 +9,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 /** Adatta un download temporaneo a un MultipartFile senza caricarlo tutto in RAM. */
-final class TemporaryVideoMultipart implements MultipartFile {
+public final class TemporaryVideoMultipart implements MultipartFile {
     private final Path source;
     private final String fileName;
-    TemporaryVideoMultipart(Path source, String fileName) {
+    public TemporaryVideoMultipart(Path source, String fileName) {
         this.source = source;
         this.fileName = fileName;
     }

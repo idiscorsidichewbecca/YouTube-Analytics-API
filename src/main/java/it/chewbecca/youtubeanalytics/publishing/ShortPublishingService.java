@@ -54,8 +54,30 @@ public class ShortPublishingService {
             throw new IllegalArgumentException("Titolo obbligatorio max 100 caratteri; descrizione obbligatoria max 5000");
         }
         ShortPublicationPlanner.Recommendation recommendation = planner.recommend();
-        return drafts.save(ShortDraft.create(brief, title.trim(), description.trim(),
-                recommendation.recommended().dateTime().toInstant(), madeForKids, clock.instant()));
+        return prepareFromChatAt(brief, title, description, madeForKids,
+                recommendation.recommended().dateTime().toInstant());
+    }
+
+    /** Usa la data scelta dall'utente, senza sovrascriverla con un orario suggerito. */
+    public ShortDraft prepareFromChatAt(String brief, String title, String description,
+                                        boolean madeForKids, Instant publishAt) {
+        if (!StringUtils.hasText(brief) || brief.trim().length() < 30 || brief.length() > 10000) {
+            throw new IllegalArgumentException("Brief o trascrizione: da 30 a 10000 caratteri");
+        }
+        if (!StringUtils.hasText(title) || title.codePointCount(0, title.length()) > 100 ||
+                !StringUtils.hasText(description) || description.length() > 5000) {
+            throw new IllegalArgumentException("Titolo obbligatorio max 100 caratteri; descrizione obbligatoria max 5000");
+        }
+        validatePublishAt(publishAt, clock.instant());
+        return drafts.save(ShortDraft.create(brief.trim(), title.trim(), description.trim(),
+                publishAt, madeForKids, clock.instant()));
+    }
+
+    static void validatePublishAt(Instant when, Instant now) {
+        if (when == null || when.isBefore(now.plus(Duration.ofHours(1))) ||
+                when.isAfter(now.plus(Duration.ofDays(365)))) {
+            throw new IllegalArgumentException("La pubblicazione deve essere tra un'ora e 365 giorni da adesso");
+        }
     }
 
     public ShortDraft getDraft(String id) {
@@ -77,9 +99,7 @@ public class ShortPublishingService {
             throw new IllegalArgumentException("Titolo max 100 caratteri e descrizione max 5000");
         }
         Instant now = clock.instant();
-        if (when.isBefore(now.plus(Duration.ofHours(1))) || when.isAfter(now.plus(Duration.ofHours(48)))) {
-            throw new IllegalArgumentException("Seleziona uno slot tra un'ora e 48 ore da adesso");
-        }
+        validatePublishAt(when, now);
         boolean kids = current.isMadeForKids();
         transactions.executeWithoutResult(status -> {
             ShortDraft toUpload = getDraft(id);
