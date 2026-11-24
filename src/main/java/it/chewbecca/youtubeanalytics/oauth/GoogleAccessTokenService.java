@@ -56,6 +56,17 @@ public class GoogleAccessTokenService {
     }
 
     @Transactional(readOnly = true)
+    public void requireUploadScope() {
+        YoutubeCredential credential = requireCredential();
+        String scopes = credential.getScopes();
+        if (scopes == null || !java.util.List.of(scopes.trim().split("\\s+")).contains(
+                "https://www.googleapis.com/auth/youtube.upload")) {
+            throw new IllegalArgumentException(
+                    "Scope youtube.upload mancante: ricollega YouTube da /admin/youtube/connect e autorizza il nuovo permesso");
+        }
+    }
+
+    @Transactional(readOnly = true)
     public void requireMonetaryAnalyticsScope() {
         YoutubeCredential credential = requireCredential();
         String scopes = credential.getScopes();

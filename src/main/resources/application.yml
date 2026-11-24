@@ -17,6 +17,11 @@ spring:
         jdbc:
           time_zone: UTC
 
+  servlet:
+    multipart:
+      max-file-size: 300MB
+      max-request-size: 301MB
+
   cache:
     type: caffeine
     caffeine:

@@ -157,6 +157,14 @@ public class YouTubeAnalyticsClient {
         return result;
     }
 
+    /** Views nei primi sette giorni di calendario dalla pubblicazione: finestra uguale per ogni video. */
+    public long getVideoFirstWeekViews(String videoId, LocalDate publicationDay) {
+        return firstMetrics(query(new AnalyticsQuery(
+                publicationDay, publicationDay.plusDays(6), "views", null,
+                "video==" + videoId, null, null, null
+        ))).views();
+    }
+
     public AnalyticsMetrics getVideoAggregate(String videoId, LocalDate startDate, LocalDate endDate) {
         String filter = "video==" + videoId;
         AnalyticsMetrics core = firstMetrics(query(new AnalyticsQuery(

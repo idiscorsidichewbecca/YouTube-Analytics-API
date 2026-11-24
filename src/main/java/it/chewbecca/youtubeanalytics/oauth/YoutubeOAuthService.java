@@ -20,7 +20,8 @@ public class YoutubeOAuthService {
     private static final List<String> SCOPES = List.of(
             "https://www.googleapis.com/auth/youtube.readonly",
             "https://www.googleapis.com/auth/yt-analytics.readonly",
-            MONETARY_ANALYTICS_SCOPE
+            MONETARY_ANALYTICS_SCOPE,
+            "https://www.googleapis.com/auth/youtube.upload"
     );
 
     private final GoogleOAuthProperties properties;
