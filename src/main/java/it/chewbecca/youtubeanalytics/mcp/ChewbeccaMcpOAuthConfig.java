@@ -42,7 +42,7 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Toke
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
-import org.springframework.security.oauth2.server.authorization.web.OAuth2AuthorizationEndpointFilter;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.web.filter.OncePerRequestFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -67,19 +67,23 @@ public class ChewbeccaMcpOAuthConfig {
             .csrf(csrf -> csrf.ignoringRequestMatchers(as.getEndpointsMatcher()));
         // Una sola audience consentita: il parametro RFC 8707 deve corrispondere alla risorsa MCP.
         String resource = base.replaceAll("/+$", "") + "/mcp";
-        http.addFilterBefore(new OncePerRequestFilter() {
+        http.addFilterAfter(new OncePerRequestFilter() {
             @Override
             protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                     FilterChain chain) throws ServletException, IOException {
                 String path = request.getRequestURI();
+                String requestedResource = request.getParameter("resource");
+                // Un client puo' omettere resource: la audience dei JWT resta comunque
+                // vincolata a /mcp dal token customizer e verificata dal JwtDecoder.
+                // Se viene specificata una risorsa diversa, la richiesta e' rifiutata.
                 if ((path.equals("/oauth2/authorize") || path.equals("/oauth2/token"))
-                        && !resource.equals(request.getParameter("resource"))) {
+                        && requestedResource != null && !resource.equals(requestedResource)) {
                     response.sendError(400, "Invalid OAuth resource");
                     return;
                 }
                 chain.doFilter(request, response);
             }
-        }, OAuth2AuthorizationEndpointFilter.class);
+        }, SecurityContextHolderFilter.class);
         return http.build();
     }
 
