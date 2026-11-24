@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chiave OAuth Chewbecca — locale</title></head><body style="max-width:760px;margin:2rem auto;font:16px system-ui">
+<h1>Generatore locale chiave OAuth MCP</h1>
+<p>Questo file funziona nel tuo browser. La chiave viene generata con Web Crypto, <b>non viene inviata in rete</b>.</p>
+<button id="generate">Genera chiave RSA 3072</button>
+<p><label for="out">Copia il valore in Render → Environment → <code>MCP_SIGNING_PRIVATE_KEY_PKCS8_B64</code>:</label></p>
+<textarea id="out" readonly rows="10" style="width:100%"></textarea>
+<p>Non incollare questa chiave in chat, email o GitHub. Non rigenerarla dopo ogni deploy: renderebbe non validi i token OAuth esistenti.</p>
+<script>
+document.querySelector('#generate').onclick = async () => {
+ const k = await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5', modulusLength:3072, publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'}, true, ['sign','verify']);
+ const b = new Uint8Array(await crypto.subtle.exportKey('pkcs8',k.privateKey));
+ let binary=''; for(let i=0;i<b.length;i++) binary+=String.fromCharCode(b[i]);
+ document.querySelector('#out').value=btoa(binary);
+};
+</script></body></html>

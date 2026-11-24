@@ -125,3 +125,4 @@ spring.ai.mcp.server.streamable-http.mcp-endpoint: /mcp
 app.mcp.enabled: ${MCP_ENABLED:false}
 app.mcp.public-url: ${MCP_PUBLIC_URL:}
 app.mcp.redirect-uri: ${MCP_REDIRECT_URI:https://chatgpt.com/connector_platform_oauth_redirect}
+app.mcp.signing-private-key-pkcs8-b64: ${MCP_SIGNING_PRIVATE_KEY_PKCS8_B64:}

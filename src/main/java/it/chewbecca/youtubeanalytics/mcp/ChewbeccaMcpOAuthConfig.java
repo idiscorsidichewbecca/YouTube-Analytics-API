@@ -1,7 +1,12 @@
 package it.chewbecca.youtubeanalytics.mcp;
 
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
+import java.security.KeyFactory;
+import java.security.MessageDigest;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPublicKeySpec;
+import java.util.Base64;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.util.List;
@@ -116,18 +121,41 @@ public class ChewbeccaMcpOAuthConfig {
         return AuthorizationServerSettings.builder().issuer(base.replaceAll("/+$", "")).build();
     }
 
+    /**
+     * Stable key material is mandatory. Never generate an ephemeral signing key
+     * on startup: that would invalidate tokens after each Render redeploy.
+     * Keep the PKCS#8 DER Base64 value in Render's secret environment only.
+     */
     @Bean
-    KeyPair mcpSigningKeyPair() throws Exception {
-        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
-        g.initialize(3072);
-        return g.generateKeyPair();
+    KeyPair mcpSigningKeyPair(@Value("${app.mcp.signing-private-key-pkcs8-b64:}") String encoded) throws Exception {
+        return keyPairFromPkcs8Base64(encoded);
+    }
+
+    static KeyPair keyPairFromPkcs8Base64(String encoded) throws Exception {
+        if (encoded == null || encoded.isBlank()) {
+            throw new IllegalStateException("MCP_SIGNING_PRIVATE_KEY_PKCS8_B64 mancante: MCP non può essere abilitato");
+        }
+        byte[] pkcs8;
+        try {
+            pkcs8 = Base64.getDecoder().decode(encoded.replaceAll("\\s+", ""));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("MCP_SIGNING_PRIVATE_KEY_PKCS8_B64 non è Base64 valido", ex);
+        }
+        var privateKey = KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
+        if (!(privateKey instanceof RSAPrivateCrtKey rsa) || rsa.getModulus().bitLength() < 3072) {
+            throw new IllegalStateException("Usa una chiave RSA PKCS#8 con almeno 3072 bit");
+        }
+        var publicKey = KeyFactory.getInstance("RSA").generatePublic(
+                new RSAPublicKeySpec(rsa.getModulus(), rsa.getPublicExponent()));
+        return new KeyPair(publicKey, privateKey);
     }
 
     @Bean
-    JWKSource<SecurityContext> jwkSource(KeyPair mcpSigningKeyPair) {
+    JWKSource<SecurityContext> jwkSource(KeyPair mcpSigningKeyPair) throws Exception {
         RSAKey rsa = new RSAKey.Builder((RSAPublicKey) mcpSigningKeyPair.getPublic())
             .privateKey(mcpSigningKeyPair.getPrivate())
-            .keyID(UUID.randomUUID().toString()).build();
+            .keyID(Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    MessageDigest.getInstance("SHA-256").digest(mcpSigningKeyPair.getPublic().getEncoded()))).build();
         JWKSet jwkSet = new JWKSet(rsa);
         return (selector, context) -> selector.select(jwkSet);
     }
