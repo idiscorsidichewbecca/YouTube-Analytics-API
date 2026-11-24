@@ -44,6 +44,20 @@ public class ShortPublishingService {
                 recommendation.recommended().dateTime().toInstant(), madeForKids, clock.instant()));
     }
 
+    /** Variante per ChatGPT: la chat prepara i testi, il backend valida e persiste, nessuna OpenAI API aggiuntiva. */
+    public ShortDraft prepareFromChat(String brief, String title, String description, boolean madeForKids) {
+        if (!StringUtils.hasText(brief) || brief.trim().length() < 30 || brief.length() > 10000) {
+            throw new IllegalArgumentException("Brief/trascrizione: 30-10000 caratteri");
+        }
+        if (!StringUtils.hasText(title) || title.codePointCount(0, title.length()) > 100 ||
+                !StringUtils.hasText(description) || description.length() > 5000) {
+            throw new IllegalArgumentException("Titolo obbligatorio max 100 caratteri; descrizione obbligatoria max 5000");
+        }
+        ShortPublicationPlanner.Recommendation recommendation = planner.recommend();
+        return drafts.save(ShortDraft.create(brief, title.trim(), description.trim(),
+                recommendation.recommended().dateTime().toInstant(), madeForKids, clock.instant()));
+    }
+
     public ShortDraft getDraft(String id) {
         return drafts.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Bozza non trovata: " + id));

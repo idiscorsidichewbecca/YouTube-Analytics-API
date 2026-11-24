@@ -1,0 +1,17 @@
+Crea nel MIO ChatGPT Site personale un plugin privato chiamato "Chewbecca Studio" con server MCP e quattro strumenti (incluso il controllo dello stato). È per il mio uso personale; non pubblicarlo in un catalogo pubblico e non consentire a visitatori anonimi di invocare gli strumenti. Richiedi l'identità autenticata del proprietario del Site per ogni tool.
+
+I dati e le operazioni YouTube risiedono nel mio backend Spring Boot su Render. Nessuna chiave Google va trasferita a ChatGPT. Configura e usa SOLO segreti server-side:
+- CHEWBECCA_BACKEND_URL = URL HTTPS del mio servizio Render (mi chiedi di impostarlo in Settings > Secrets)
+- CHEWBECCA_PLUGIN_KEY = credenziale privata di servizio (mi chiedi di impostarla in Settings > Secrets)
+
+Il server del Site chiama il backend con header `Authorization: Bearer ${CHEWBECCA_PLUGIN_KEY}`, ma non restituisce mai segreti, header o download URL del file in messaggi di chat o log. Usa il file di riferimento docs/sites-mcp-tools.ts come modello del contratto e adegua il codice alle API del Site.
+
+Tools:
+1. `chewbecca_recommend_slot` (readOnly): GET {BACKEND}/internal/chatgpt/shorts/recommendation, ritorna storico di 2 mesi e classifica i migliori orari delle 48 ore seguenti. Presenta al proprietario la data migliore, le alternative e confidenza della stima. NON spacciare la previsione per la heatmap ufficiale YouTube Studio.
+2. `chewbecca_prepare_short` (write draft, non pubblica): input brief (30-10000 caratteri), title (max100), description (max5000), madeForKids boolean. POST /internal/chatgpt/shorts/drafts. Prima di chiamarlo, crea titolo e descrizione coerenti al contenuto dell'allegato SE puoi accedervi; in caso contrario chiedimi una breve trascrizione o un brief. La bozza contiene l'id e il publishAt proposto.
+3. `chewbecca_get_status` (readOnly): GET /internal/chatgpt/shorts/drafts/{id}.
+4. `chewbecca_schedule_short` (write/destructive): input id, file (oggetto file ChatGPT con download_url e file_id required, mime_type e file_name optional), confirmationText, title? description? publishAt?; POST /internal/chatgpt/shorts/drafts/{id}/schedule. Dichiarare la proprietà file come `openai/fileParams`, con tutti e quattro i campi tipizzati secondo la specifica ufficiale. Mai chiedermi di incollare download_url o token. Chiamare SOLO dopo che ho visto titolo, descrizione, data/orario ed ho scritto esplicitamente `CONFERMO <id>` in chat. L'azione deve richiedere conferma dell'host prima di eseguire.
+
+NON eseguire automaticamente retry del tool schedule se una chiamata fallisce o ritorna UNKNOWN: il video potrebbe essere stato caricato. Invoca get_status e chiedimi di verificare YouTube Studio. Il calendario di pubblicazione è Europe/Rome, mentre il backend usa ISO-8601/UTC negli eventi persistiti.
+
+Mantieni i plugin segreti e il backend isolati dai tool di sola lettura pubblici. Prima dell'installazione mostra i tool generati e verifica che il controllo di identità sia owner-only.

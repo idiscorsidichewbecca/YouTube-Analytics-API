@@ -95,6 +95,11 @@ app:
     max-output-tokens: ${OPENAI_MAX_OUTPUT_TOKENS:3000}
     max-tool-rounds: ${OPENAI_MAX_TOOL_ROUNDS:6}
 
+  chatgpt-bridge:
+    enabled: ${CHATGPT_BRIDGE_ENABLED:false}
+    bearer-key: ${CHATGPT_BRIDGE_API_KEY:}
+    allowed-file-hosts: ${CHATGPT_FILE_ALLOWED_HOSTS:files.oaiusercontent.com,files.openai.com}
+
   youtube:
     default-report-days: 28
     shorts-duration-fallback-seconds: 180

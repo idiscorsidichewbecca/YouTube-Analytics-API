@@ -431,3 +431,8 @@ La dimensione massima della risposta applicativa è stata portata a 500, così i
 ## Revenue robuste e storico mensile
 
 La release corrente separa i ricavi stimati principali dalle metriche pubblicitarie opzionali, pagina il report per video e usa la dimensione mensile nativa. È inoltre disponibile `GET /api/v1/integration/youtube/status` per verificare il permesso monetario. Vedi `docs/ROBUST_REVENUE_AND_MONTHLY_HISTORY.md`.
+
+
+## Plugin privato ChatGPT Sites (nuovo)
+
+Per controllare la pubblicazione degli YouTube Shorts interamente da una chat di ChatGPT Plus, usa il bridge REST isolato `/internal/chatgpt/shorts/**` e crea un plugin personale ospitato in ChatGPT Sites. I file di riferimento e i passaggi sono in [`docs/CHATGPT-SITES-CHEWBECCA.md`](docs/CHATGPT-SITES-CHEWBECCA.md). Le richieste di pubblicazione necessitano della chiave separata `CHATGPT_BRIDGE_API_KEY` e della conferma esplicita `CONFERMO <id-bozza>`. **Le Actions del GPT storico e il relativo token non possono pubblicare.**

@@ -3,6 +3,7 @@ package it.chewbecca.youtubeanalytics.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import it.chewbecca.youtubeanalytics.meta.config.MetaProperties;
+import it.chewbecca.youtubeanalytics.chatgpt.ChatGptBridgeProperties;
 import it.chewbecca.youtubeanalytics.assistant.config.AssistantProperties;
 import it.chewbecca.youtubeanalytics.telegram.config.TelegramProperties;
 import org.springframework.boot.ApplicationArguments;
@@ -26,17 +27,20 @@ public class SecretValidationRunner implements ApplicationRunner {
     private final MetaProperties metaProperties;
     private final TelegramProperties telegramProperties;
     private final AssistantProperties assistantProperties;
+    private final ChatGptBridgeProperties chatGptBridgeProperties;
 
     public SecretValidationRunner(AppSecurityProperties properties,
                                   GoogleOAuthProperties googleOAuthProperties,
                                   MetaProperties metaProperties,
                                   TelegramProperties telegramProperties,
-                                  AssistantProperties assistantProperties) {
+                                  AssistantProperties assistantProperties,
+                                  ChatGptBridgeProperties chatGptBridgeProperties) {
         this.properties = properties;
         this.googleOAuthProperties = googleOAuthProperties;
         this.metaProperties = metaProperties;
         this.telegramProperties = telegramProperties;
         this.assistantProperties = assistantProperties;
+        this.chatGptBridgeProperties = chatGptBridgeProperties;
     }
 
     @Override
@@ -88,6 +92,16 @@ public class SecretValidationRunner implements ApplicationRunner {
             }
         }
 
+        if (chatGptBridgeProperties.enabled()) {
+            String key = chatGptBridgeProperties.bearerKey();
+            if (!StringUtils.hasText(key) || key.length() < 32 ||
+                    key.equals(properties.gptApiKey()) || key.equals(properties.adminPassword())) {
+                insecure.add("CHATGPT_BRIDGE_API_KEY (min 32 caratteri, diversa dalle altre credenziali)");
+            }
+            if (chatGptBridgeProperties.allowedFileHosts().isEmpty()) {
+                insecure.add("CHATGPT_FILE_ALLOWED_HOSTS");
+            }
+        }
         if (!insecure.isEmpty()) {
             String message = "Configurazione non sicura o incompleta: " + String.join(", ", insecure);
             if (properties.failOnDefaultSecrets()) {

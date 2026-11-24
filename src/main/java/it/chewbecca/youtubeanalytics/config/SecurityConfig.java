@@ -1,7 +1,9 @@
 package it.chewbecca.youtubeanalytics.config;
 
 import it.chewbecca.youtubeanalytics.security.ApiKeyAuthenticationFilter;
+import it.chewbecca.youtubeanalytics.chatgpt.ChatGptBridgeAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,6 +17,15 @@ import org.springframework.security.web.authentication.www.BasicAuthenticationFi
 
 @Configuration
 public class SecurityConfig {
+
+    /** Evita una seconda esecuzione del filtro come servlet filter fuori da Spring Security. */
+    @Bean
+    FilterRegistrationBean<ChatGptBridgeAuthenticationFilter> chatGptBridgeFilterRegistration(
+            ChatGptBridgeAuthenticationFilter filter) {
+        FilterRegistrationBean<ChatGptBridgeAuthenticationFilter> bean = new FilterRegistrationBean<>(filter);
+        bean.setEnabled(false);
+        return bean;
+    }
 
     @Bean
     PasswordEncoder passwordEncoder() {
@@ -33,7 +44,8 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                            ApiKeyAuthenticationFilter apiKeyAuthenticationFilter) throws Exception {
+                                            ApiKeyAuthenticationFilter apiKeyAuthenticationFilter,
+                                            ChatGptBridgeAuthenticationFilter chatGptBridgeAuthenticationFilter) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
@@ -48,12 +60,14 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
+                        .requestMatchers("/internal/chatgpt/**").hasRole("CHATGPT_PLUGIN")
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasRole("GPT")
                         .anyRequest().permitAll()
                 )
                 .httpBasic(Customizer.withDefaults())
                 .addFilterBefore(apiKeyAuthenticationFilter, BasicAuthenticationFilter.class)
+                .addFilterBefore(chatGptBridgeAuthenticationFilter, BasicAuthenticationFilter.class)
                 .build();
     }
 }
