@@ -1,44 +1,50 @@
 package it.chewbecca.youtubeanalytics.chatgpt;
 
 import org.junit.jupiter.api.Test;
+
 import java.util.List;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import static org.assertj.core.api.Assertions.*;
 
 class OpenAiFileDownloadServiceTest {
     private final OpenAiFileDownloadService service = new OpenAiFileDownloadService(
-            new ChatGptBridgeProperties(true, "x".repeat(48),
-                    List.of("files.oaiusercontent.com", "files.openai.com")));
+            new ChatGptBridgeProperties(false, "", List.of("files.oaiusercontent.com", "files.openai.com")));
 
-    @Test void acceptsExpectedHttpsFileOnly() {
-        var uri = service.validate(file("https://files.oaiusercontent.com/asset/short.mp4?token=abc"));
-        assertThat(uri.getHost()).isEqualTo("files.oaiusercontent.com");
+    private OpenAiFileDownloadService.FileInput input(String url) {
+        return new OpenAiFileDownloadService.FileInput(url, "file_12345678", "video/mp4", "reel.mp4");
     }
-    @Test void rejectsLocalhostAndPrivateNetwork() {
-        assertThatThrownBy(() -> service.validate(file("http://localhost:8080/admin/youtube")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.validate(file("https://127.0.0.1/private")))
-                .isInstanceOf(IllegalArgumentException.class);
+
+    @Test void allowsOnlyExactConfiguredHost() {
+        assertThat(service.validate(input("https://files.oaiusercontent.com/a.mp4?signature=secret"))
+                .getHost()).isEqualTo("files.oaiusercontent.com");
     }
-    @Test void rejectsSubdomainsOfAllowedHosts() {
-        assertThatThrownBy(() -> service.validate(file("https://files.openai.com.evil.example/short.mp4")))
-                .isInstanceOf(IllegalArgumentException.class);
+
+    @Test void rejectsLookalikeHostname() {
+        assertThatThrownBy(() -> service.validate(input("https://files.oaiusercontent.com.attacker.org/video.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.HOST_NOT_ALLOWED);
     }
-    @Test void rejectsCredentialsAndUnexpectedPorts() {
-        assertThatThrownBy(() -> service.validate(file("https://user:pass@files.openai.com/short.mp4")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.validate(file("https://files.openai.com:8443/short.mp4")))
-                .isInstanceOf(IllegalArgumentException.class);
+
+    @Test void rejectsPrivateAddressEvenWhenHttps() {
+        assertThatThrownBy(() -> service.validate(input("https://127.0.0.1/video.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.HOST_NOT_ALLOWED);
     }
-    @Test void rejectsNonMp4AndInvalidFileIds() {
-        assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
-                "https://files.openai.com/x", "file_1234567890", "application/pdf", "test.pdf")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
-                "https://files.openai.com/x", "not-a-file-id", "video/mp4", "test.mp4")))
-                .isInstanceOf(IllegalArgumentException.class);
+
+    @Test void rejectsHttpAndCredentialBearingUrl() {
+        assertThatThrownBy(() -> service.validate(input("http://files.oaiusercontent.com/video.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_URL);
+        assertThatThrownBy(() -> service.validate(input("https://user:pass@files.oaiusercontent.com/video.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_URL);
     }
-    private static OpenAiFileDownloadService.FileInput file(String url) {
-        return new OpenAiFileDownloadService.FileInput(url, "file_1234567890", "video/mp4", "test.mp4");
+
+    @Test void rejectsInvalidFileId() {
+        var file = new OpenAiFileDownloadService.FileInput("https://files.oaiusercontent.com/video.mp4",
+                "malformed", "video/mp4", "video.mp4");
+        assertThatThrownBy(() -> service.validate(file))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_FILE);
     }
 }

@@ -22,6 +22,8 @@ class ChewbeccaMcpPublishingToolsTest {
         assertThat(schedule.name()).isEqualTo("chewbecca_schedule_short");
         assertThat(schedule.meta().get("openai/fileParams")).isEqualTo(List.of("file"));
         assertThat(schedule.meta().toString()).contains("shorts:write");
+        assertThat(schedule.description()).contains("NON aprire YouTube Studio");
+        assertThat(schedule.description()).contains("DOWNLOAD_FAILED");
         assertThat(schedule.inputSchema().required())
                 .containsExactlyInAnyOrder("draft_id", "confirmation_text", "file");
     }

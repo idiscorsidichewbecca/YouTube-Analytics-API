@@ -103,9 +103,15 @@ public class ChewbeccaMcpPublishingTools {
                     } finally {
                         try { Files.deleteIfExists(downloaded); } catch (IOException ignored) { }
                     }
+                } catch (OpenAiFileDownloadService.AttachmentDownloadException e) {
+                    // File non disponibile: nessuna chiamata di upload YouTube è iniziata.
+                    // Non rivelare download_url, token o file_id nel risultato MCP.
+                    return attachmentFailed(e);
                 } catch (SecurityException e) {
                     return insufficientScope(mcpBaseUrl);
                 } catch (RuntimeException e) {
+                    // Se il problema avviene DOPO il download, l'esito dell'upload
+                    // potrebbe essere incerto. Non fare retry in automatico.
                     return failure(e);
                 }
             })
@@ -146,7 +152,19 @@ public class ChewbeccaMcpPublishingTools {
         return McpSchema.Tool.builder()
                 .name("chewbecca_schedule_short")
                 .title("Programma Short su YouTube")
-                .description("AZIONE DI SCRITTURA REALE su YouTube. Richiede consenso ESPLICITO dell'utente DOPO l'anteprima di titolo, descrizione, madeForKids e data/ora; NON invocare solo perché il modello ha generato una bozza. Usa il file MP4 allegato da ChatGPT; carica come privato e imposta publishAt sulla bozza approvata. NON riprovare automaticamente dopo errori di upload: l'esito potrebbe essere incerto. Richiede shorts:write.")
+                .description("""
+                        AZIONE DI SCRITTURA REALE su YouTube. Richiede consenso ESPLICITO
+                        dell'utente dopo anteprima di titolo, descrizione, madeForKids e
+                        data/ora. Carica MP4 allegato come privato con publishAt.
+                        Richiede shorts:write.
+                        Se il risultato è DOWNLOAD_FAILED, interrompi l'operazione:
+                        l'upload YouTube NON è iniziato. Mostra all'utente il codice errore.
+                        NON aprire YouTube Studio e NON usare browser automation come
+                        alternativa. NON chiedere email o password Google. NON richiedere
+                        un caricamento manuale su YouTube Studio.
+                        Se fallisce la chiamata di upload, l'esito può essere incerto:
+                        non effettuare retry automatici e chiedi di verificare lo stato.
+                        """)
                 .inputSchema(new McpSchema.JsonSchema("object", props,
                         List.of("draft_id", "confirmation_text", "file"), false,
                         Map.of("OpenAIFile", file), null))
@@ -203,6 +221,19 @@ public class ChewbeccaMcpPublishingTools {
                 List.of(new McpSchema.TextContent("Autorizzazione shorts:write necessaria: riconnetti l'app.")),
                 true, null, Map.of("mcp/www_authenticate", List.of(challenge)));
     }
+    private static McpSchema.CallToolResult attachmentFailed(
+            OpenAiFileDownloadService.AttachmentDownloadException e) {
+        // Codice machine-readable, senza URL firmati, query, file_id o token.
+        String info = "DOWNLOAD_FAILED code=" + e.code()
+                + " uploadStarted=false. "
+                + "Il server ha bloccato il download del file prima di contattare YouTube. "
+                + "Non aprire YouTube Studio, non chiedere credenziali Google e non "
+                + "tentare altre modalità di pubblicazione. "
+                + "Consulta i log Render (MCP_FILE_DOWNLOAD_FAILED).";
+        return new McpSchema.CallToolResult(
+                List.of(new McpSchema.TextContent(info)), true);
+    }
+
     private static McpSchema.CallToolResult failure(Exception e) {
         // Non includere URL temporanei, token o stack trace nel testo restituito al client.
         String message = e.getMessage() == null ? "Operazione non completata" : e.getMessage();
