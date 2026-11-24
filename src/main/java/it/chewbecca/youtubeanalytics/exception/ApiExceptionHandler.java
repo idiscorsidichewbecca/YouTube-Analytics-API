@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
@@ -29,6 +30,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler({MetaNotConnectedException.class, MetaTokenExpiredException.class})
     ResponseEntity<ApiError> metaUnavailable(RuntimeException ex) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
+    /** Path assente: risposta HTTP 404 e non errore interno HTTP 500. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    ResponseEntity<ApiError> noStaticResource(NoResourceFoundException ex) {
+        return error(HttpStatus.NOT_FOUND, "Endpoint non trovato");
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
