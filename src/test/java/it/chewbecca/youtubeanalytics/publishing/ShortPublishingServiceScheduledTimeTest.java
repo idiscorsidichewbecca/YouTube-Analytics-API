@@ -16,7 +16,7 @@ class ShortPublishingServiceScheduledTimeTest {
     final ShortPublishingService service = new ShortPublishingService(
             mock(ShortPublicationPlanner.class), mock(ShortMetadataGenerator.class), drafts,
             mock(YouTubeShortUploadClient.class), mock(GoogleAccessTokenService.class),
-            mock(TransactionTemplate.class), now);
+            mock(TransactionTemplate.class), now, mock(WeeklyShortPlanner.class));
 
     @Test void userSelectedDateIsPreservedRatherThanRecommendedTime() {
         when(drafts.save(any(ShortDraft.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -27,7 +27,19 @@ class ShortPublishingServiceScheduledTimeTest {
                 false, wanted);
         assertThat(d.getPublishAt()).isEqualTo(wanted);
         assertThat(d.getStatus()).isEqualTo(ShortDraft.Status.DRAFT);
+        assertThat(d.isWeeklyPlan()).isFalse();
         verify(drafts).save(any(ShortDraft.class));
+    }
+
+    @Test void weeklyDraftsExpireAtTheEndOfTheItalianWeek() {
+        var brief = "Un video documentario su un veicolo di Star Wars con diverse curiosità.";
+        when(drafts.save(any(ShortDraft.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        var sunday = Instant.parse("2026-11-29T22:30:00Z");
+        var monday = Instant.parse("2026-11-29T23:00:00Z");
+        assertThat(service.prepareFromChatAt(brief, "Titolo", "Descrizione", false, sunday, true)
+                .isWeeklyPlan()).isTrue();
+        assertThatThrownBy(() -> service.prepareFromChatAt(brief, "Titolo", "Descrizione", false, monday, true))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test void tooNearAndTooFarDatesAreRejected() {

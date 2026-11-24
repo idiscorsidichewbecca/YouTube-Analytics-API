@@ -67,6 +67,18 @@ public class GoogleAccessTokenService {
     }
 
     @Transactional(readOnly = true)
+    public void requirePlaylistScope() {
+        YoutubeCredential credential = requireCredential();
+        String scopes = credential.getScopes();
+        if (scopes == null || !java.util.List.of(scopes.trim().split("\\s+")).contains(
+                YoutubeOAuthService.PLAYLIST_SCOPE)) {
+            throw new IllegalArgumentException(
+                    "Scope youtube.force-ssl mancante: ricollega Google da /admin/youtube/connect " +
+                    "per autorizzare la gestione delle playlist");
+        }
+    }
+
+    @Transactional(readOnly = true)
     public void requireMonetaryAnalyticsScope() {
         YoutubeCredential credential = requireCredential();
         String scopes = credential.getScopes();

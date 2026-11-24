@@ -13,6 +13,7 @@ import java.time.Instant;
 @Service
 public class ShortPublishingService {
     private final ShortPublicationPlanner planner;
+    private final WeeklyShortPlanner weeklyPlanner;
     private final ShortMetadataGenerator metadataGenerator;
     private final ShortDraftRepository drafts;
     private final YouTubeShortUploadClient upload;
@@ -24,8 +25,9 @@ public class ShortPublishingService {
                                   ShortMetadataGenerator metadataGenerator,
                                   ShortDraftRepository drafts, YouTubeShortUploadClient upload,
                                   GoogleAccessTokenService tokens, TransactionTemplate transactions,
-                                  Clock clock) {
+                                  Clock clock, WeeklyShortPlanner weeklyPlanner) {
         this.planner = planner;
+        this.weeklyPlanner = weeklyPlanner;
         this.metadataGenerator = metadataGenerator;
         this.drafts = drafts;
         this.upload = upload;
@@ -61,6 +63,11 @@ public class ShortPublishingService {
     /** Usa la data scelta dall'utente, senza sovrascriverla con un orario suggerito. */
     public ShortDraft prepareFromChatAt(String brief, String title, String description,
                                         boolean madeForKids, Instant publishAt) {
+        return prepareFromChatAt(brief, title, description, madeForKids, publishAt, false);
+    }
+
+    public ShortDraft prepareFromChatAt(String brief, String title, String description,
+                                       boolean madeForKids, Instant publishAt, boolean weeklyPlan) {
         if (!StringUtils.hasText(brief) || brief.trim().length() < 30 || brief.length() > 10000) {
             throw new IllegalArgumentException("Brief o trascrizione: da 30 a 10000 caratteri");
         }
@@ -68,9 +75,15 @@ public class ShortPublishingService {
                 !StringUtils.hasText(description) || description.length() > 5000) {
             throw new IllegalArgumentException("Titolo obbligatorio max 100 caratteri; descrizione obbligatoria max 5000");
         }
-        validatePublishAt(publishAt, clock.instant());
-        return drafts.save(ShortDraft.create(brief.trim(), title.trim(), description.trim(),
-                publishAt, madeForKids, clock.instant()));
+        Instant now = clock.instant();
+        validatePublishAt(publishAt, now);
+        ShortDraft draft = ShortDraft.create(brief.trim(), title.trim(), description.trim(),
+                publishAt, madeForKids, now);
+        if (weeklyPlan) {
+            WeeklyShortPlanner.validateCurrentWeek(publishAt, now);
+            draft.useWeeklyPlan();
+        }
+        return drafts.save(draft);
     }
 
     static void validatePublishAt(Instant when, Instant now) {
@@ -88,9 +101,26 @@ public class ShortPublishingService {
     /** Solo l'esplicita conferma dell'ADMIN può far partire l'upload. */
     public ShortDraft schedule(String id, MultipartFile video, String titleOverride,
                                String descriptionOverride, Instant timeOverride) {
+        ShortDraft current = getDraft(id);
+        if (current.isWeeklyPlan()) {
+            throw new IllegalArgumentException("Conferma le bozze settimanali tramite Chewbecca Studio");
+        }
+        return schedule(current, video, titleOverride, descriptionOverride, timeOverride);
+    }
+
+    public ShortDraft scheduleWeekly(String id, MultipartFile video) {
+        ShortDraft current = getDraft(id);
+        if (!current.isWeeklyPlan()) {
+            throw new IllegalArgumentException("La bozza non è una pianificazione settimanale");
+        }
+        return schedule(current, video, null, null, null);
+    }
+
+    private ShortDraft schedule(ShortDraft current, MultipartFile video, String titleOverride,
+                                String descriptionOverride, Instant timeOverride) {
         YouTubeShortUploadClient.validateFile(video);
         tokens.requireUploadScope();
-        ShortDraft current = getDraft(id);
+        String id = current.getId();
         String title = StringUtils.hasText(titleOverride) ? titleOverride.trim() : current.getTitle();
         String description = StringUtils.hasText(descriptionOverride)
                 ? descriptionOverride.trim() : current.getDescription();
@@ -98,14 +128,8 @@ public class ShortPublishingService {
         if (title.codePointCount(0, title.length()) > 100 || description.length() > 5000) {
             throw new IllegalArgumentException("Titolo max 100 caratteri e descrizione max 5000");
         }
-        Instant now = clock.instant();
-        validatePublishAt(when, now);
         boolean kids = current.isMadeForKids();
-        transactions.executeWithoutResult(status -> {
-            ShortDraft toUpload = getDraft(id);
-            toUpload.startUpload(title, description, when, kids);
-            drafts.saveAndFlush(toUpload);
-        });
+        reserveUpload(current, title, description, when, kids);
         try {
             String youtubeId = upload.schedule(video, title, description, when, kids);
             return transactions.execute(status -> {
@@ -122,5 +146,24 @@ public class ShortPublishingService {
             // Mai ritentare automaticamente: Google potrebbe aver ricevuto il file.
             throw ex;
         }
+    }
+
+    // Render runs one instance. Hold the lock until the reservation is committed
+    // so another confirmation sees it, including while the upload is in progress.
+    private synchronized void reserveUpload(ShortDraft current, String title, String description,
+                                            Instant when, boolean kids) {
+        String id = current.getId();
+        Instant now = clock.instant();
+        validatePublishAt(when, now);
+        if (current.isWeeklyPlan()) {
+            WeeklyShortPlanner.validateCurrentWeek(when, now);
+            weeklyPlanner.assertAvailable(when, id);
+            validatePublishAt(when, clock.instant());
+        }
+        transactions.executeWithoutResult(status -> {
+            ShortDraft toUpload = getDraft(id);
+            toUpload.startUpload(title, description, when, kids);
+            drafts.saveAndFlush(toUpload);
+        });
     }
 }

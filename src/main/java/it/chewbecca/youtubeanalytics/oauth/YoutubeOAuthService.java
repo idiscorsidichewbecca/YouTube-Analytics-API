@@ -17,11 +17,13 @@ public class YoutubeOAuthService {
     private static final String AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth";
     public static final String MONETARY_ANALYTICS_SCOPE =
             "https://www.googleapis.com/auth/yt-analytics-monetary.readonly";
+    public static final String PLAYLIST_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
     private static final List<String> SCOPES = List.of(
             "https://www.googleapis.com/auth/youtube.readonly",
             "https://www.googleapis.com/auth/yt-analytics.readonly",
             MONETARY_ANALYTICS_SCOPE,
-            "https://www.googleapis.com/auth/youtube.upload"
+            "https://www.googleapis.com/auth/youtube.upload",
+            PLAYLIST_SCOPE
     );
 
     private final GoogleOAuthProperties properties;
@@ -134,9 +136,10 @@ public class YoutubeOAuthService {
                         credential.getConnectedAt(),
                         credential.getUpdatedAt(),
                         credential.getAccessTokenExpiresAt(),
-                        hasScope(credential.getScopes(), MONETARY_ANALYTICS_SCOPE)
+                        hasScope(credential.getScopes(), MONETARY_ANALYTICS_SCOPE),
+                        hasScope(credential.getScopes(), PLAYLIST_SCOPE)
                 ))
-                .orElseGet(() -> new ConnectionStatus(false, null, null, null, null, null, null, false));
+                .orElseGet(() -> new ConnectionStatus(false, null, null, null, null, null, null, false, false));
     }
 
     private String resolveGrantedScopes(String tokenResponseScopes) {
@@ -191,7 +194,8 @@ public class YoutubeOAuthService {
             java.time.Instant connectedAt,
             java.time.Instant updatedAt,
             java.time.Instant accessTokenExpiresAt,
-            boolean monetaryAnalyticsGranted
+            boolean monetaryAnalyticsGranted,
+            boolean playlistManagementGranted
     ) {
     }
 }

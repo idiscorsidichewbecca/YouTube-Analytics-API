@@ -3,6 +3,7 @@ package it.chewbecca.youtubeanalytics.mcp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.chewbecca.youtubeanalytics.chatgpt.OpenAiFileDownloadService;
 import it.chewbecca.youtubeanalytics.publishing.ShortPublishingService;
+import it.chewbecca.youtubeanalytics.publishing.YouTubePlaylistService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -14,11 +15,15 @@ class ChewbeccaMcpPublishingToolsTest {
     @Test void scheduleToolAdvertisesOfficialOpenAiFileParameterAndWriteScope() {
         var config = new ChewbeccaMcpPublishingTools();
         var tools = config.chewbeccaPublishingTools(
-                mock(ShortPublishingService.class), mock(OpenAiFileDownloadService.class), new ObjectMapper(), "https://youtube-analytics-api.onrender.com");
+                mock(ShortPublishingService.class), mock(OpenAiFileDownloadService.class), new ObjectMapper(),
+                "https://youtube-analytics-api.onrender.com",
+                mock(YouTubePlaylistService.class));
         assertThat(tools).hasSize(2);
         var prepare = tools.get(0).tool();
         var schedule = tools.get(1).tool();
         assertThat(prepare.name()).isEqualTo("chewbecca_prepare_short");
+        assertThat(prepare.inputSchema().properties()).containsKey("weekly_plan");
+        assertThat(prepare.inputSchema().required()).doesNotContain("weekly_plan");
         assertThat(schedule.name()).isEqualTo("chewbecca_schedule_short");
         assertThat(schedule.meta().get("openai/fileParams")).isEqualTo(List.of("file"));
         assertThat(schedule.meta().toString()).contains("shorts:write");

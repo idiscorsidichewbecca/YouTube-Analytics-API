@@ -26,6 +26,8 @@ public class ShortDraft {
     private String youtubeVideoId;
     @Column(name = "made_for_kids", nullable = false)
     private boolean madeForKids;
+    @Column(name = "weekly_plan", nullable = false)
+    private boolean weeklyPlan;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private Status status;
@@ -47,6 +49,12 @@ public class ShortDraft {
         draft.status = Status.DRAFT;
         return draft;
     }
+
+    public void useWeeklyPlan() {
+        weeklyPlan = true;
+    }
+
+    public boolean isWeeklyPlan() { return weeklyPlan; }
 
     public void startUpload(String title, String description, Instant publishAt, boolean madeForKids) {
         if (status != Status.DRAFT) throw new IllegalStateException("Bozza già inviata o con esito incerto");

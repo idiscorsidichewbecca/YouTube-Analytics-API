@@ -69,3 +69,10 @@ Se il caricamento ha un esito incerto, la bozza passa a `UNKNOWN`: **non ripeter
 - Upload su disco **temporaneo**, nessun salvataggio permanente di file video; un upload ripristinabile non e' ancora implementato al livello dei chunk, il caricamento usa una sessione resumable ufficiale con un solo PUT.
 - Non ci sono ancora retry/manual reconciliation/thumbnail custom o controllo approfondito della codifica. Usa inizialmente file di prova piccoli.
 - Il comportamento su Render, disponibilita' delle API e verifica Google sono da convalidare nell'ambiente reale.
+
+## Pianificazione settimanale in Chewbecca Studio
+
+- Usa `chewbecca_plan_weekly_short` per scegliere un orario entro la domenica italiana. Il piano confronta gli Shorts dei quattro mesi precedenti sui primi sette giorni. Considera visualizzazioni totali e coinvolte, percentuale media guardata, like, commenti, condivisioni e iscritti ottenuti. Propone fino a tre orari e mostra esempi storici da usare come riferimento editoriale. Lascia almeno tre ore da altre pubblicazioni.
+- Passa l'orario scelto a `chewbecca_prepare_short` con `weekly_plan=true`. La bozza salva titolo, descrizione e destinazione ai bambini. Mostra l'anteprima e richiedi la conferma esplicita prima di invocare `chewbecca_schedule_short`.
+- All'upload, il backend rilegge il calendario. Se l'orario è ancora disponibile, programma lo Short e lo aggiunge alla playlist «Lo sapevi?». Per questo flusso occorre concedere lo scope `youtube.force-ssl` su `/admin/youtube/connect`.
+- Se la programmazione riesce e `playlistStatus` vale `NEEDS_RETRY`, usa `chewbecca_repair_short_playlist` con lo stesso ID bozza e la conferma `CONFERMO PLAYLIST <draftId>`. Il recupero usa l'ID YouTube già salvato.

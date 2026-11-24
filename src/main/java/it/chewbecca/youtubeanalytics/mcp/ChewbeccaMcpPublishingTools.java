@@ -7,6 +7,7 @@ import it.chewbecca.youtubeanalytics.chatgpt.OpenAiFileDownloadService;
 import it.chewbecca.youtubeanalytics.chatgpt.TemporaryVideoMultipart;
 import it.chewbecca.youtubeanalytics.publishing.ShortDraft;
 import it.chewbecca.youtubeanalytics.publishing.ShortPublishingService;
+import it.chewbecca.youtubeanalytics.publishing.YouTubePlaylistService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -44,7 +45,8 @@ public class ChewbeccaMcpPublishingTools {
     @Bean
     List<McpStatelessServerFeatures.SyncToolSpecification> chewbeccaPublishingTools(
             ShortPublishingService publishing, OpenAiFileDownloadService files, ObjectMapper json,
-            @Value("${app.mcp.public-url}") String mcpBaseUrl) {
+            @Value("${app.mcp.public-url}") String mcpBaseUrl,
+            YouTubePlaylistService playlists) {
         return List.of(
             new McpStatelessServerFeatures.SyncToolSpecification(prepareTool(), (context, request) -> {
                 try {
@@ -55,12 +57,14 @@ public class ChewbeccaMcpPublishingTools {
                     String dateTime = required(args, "publish_at");
                     boolean madeForKids = requiredBoolean(args, "made_for_kids");
                     Instant when = parseDateTime(dateTime);
-                    ShortDraft draft = publishing.prepareFromChatAt(brief, title, description, madeForKids, when);
+                    boolean weeklyPlan = Boolean.TRUE.equals(args.get("weekly_plan"));
+                    ShortDraft draft = publishing.prepareFromChatAt(brief, title, description, madeForKids, when, weeklyPlan);
                     return ok(json, Map.of(
                             "draftId", draft.getId(), "status", draft.getStatus().name(),
                             "title", draft.getTitle(), "description", draft.getDescription(),
                             "publishAtRome", draft.getPublishAt().atZone(ROME).toString(),
                             "madeForKids", draft.isMadeForKids(),
+                            "weeklyPlan", draft.isWeeklyPlan(),
                             "confirmationText", "CONFERMO " + draft.getId(),
                             "message", "Bozza salvata. MOSTRA titolo, descrizione, orario e stato ai fini della conferma. NON invocare schedule senza consenso esplicito dell'utente."));
                 } catch (RuntimeException e) {
@@ -81,6 +85,9 @@ public class ChewbeccaMcpPublishingTools {
                     if (draft.getStatus() != ShortDraft.Status.DRAFT) {
                         throw new IllegalStateException("Bozza già utilizzata o in stato incerto: " + draft.getStatus());
                     }
+                    if (draft.isWeeklyPlan()) {
+                        playlists.checkReady();
+                    }
                     Object fileObj = args.get("file");
                     if (!(fileObj instanceof Map<?, ?> raw)) {
                         throw new IllegalArgumentException("Allega un file MP4 alla chiamata di programmazione");
@@ -91,15 +98,40 @@ public class ChewbeccaMcpPublishingTools {
                     // Il download è consentito soltanto per host OpenAI fidati, senza redirect.
                     Path downloaded = files.download(file);
                     try {
-                        ShortDraft result = publishing.schedule(draftId,
-                                new TemporaryVideoMultipart(downloaded, "chatgpt-short.mp4"),
-                                null, null, null);
-                        return ok(json, Map.of(
-                                "draftId", result.getId(), "status", result.getStatus().name(),
-                                "videoId", result.getYoutubeVideoId(),
-                                "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
-                                "publishAtRome", result.getPublishAt().atZone(ROME).toString(),
-                                "message", "Caricamento confermato da YouTube. Stato SCHEDULED: video privato programmato."));
+                        var video = new TemporaryVideoMultipart(downloaded, "chatgpt-short.mp4");
+                        if (!draft.isWeeklyPlan()) {
+                            ShortDraft result = publishing.schedule(draftId, video, null, null, null);
+                            return ok(json, Map.of(
+                                    "draftId", result.getId(), "status", result.getStatus().name(),
+                                    "videoId", result.getYoutubeVideoId(),
+                                    "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
+                                    "publishAtRome", result.getPublishAt().atZone(ROME).toString()));
+                        }
+                        ShortDraft result = publishing.scheduleWeekly(draftId, video);
+                        // Ora il video e' gia' persistito SCHEDULED nel DB.
+                        // Eventuali errori nella playlist NON devono innescare un secondo upload.
+                        try {
+                            var assignment = playlists.ensureInTargetPlaylist(result.getYoutubeVideoId());
+                            return ok(json, Map.of(
+                                    "draftId", result.getId(), "status", result.getStatus().name(),
+                                    "videoId", result.getYoutubeVideoId(),
+                                    "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
+                                    "publishAtRome", result.getPublishAt().atZone(ROME).toString(),
+                                    "playlistTitle", assignment.playlistTitle(),
+                                    "playlistStatus", assignment.status(),
+                                    "message", "Short programmato e presente nella playlist " + assignment.playlistTitle()));
+                        } catch (RuntimeException playlistError) {
+                            return ok(json, Map.of(
+                                    "draftId", result.getId(), "status", "SCHEDULED",
+                                    "videoId", result.getYoutubeVideoId(),
+                                    "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
+                                    "publishAtRome", result.getPublishAt().atZone(ROME).toString(),
+                                    "playlistTitle", "Lo sapevi?",
+                                    "playlistStatus", "NEEDS_RETRY",
+                                    "message", "Video gia' programmato su YouTube, ma playlist non confermata. " +
+                                            "NON ricaricare il video. Dopo conferma usa " +
+                                            "chewbecca_repair_short_playlist con il medesimo draftId."));
+                        }
                     } finally {
                         try { Files.deleteIfExists(downloaded); } catch (IOException ignored) { }
                     }
@@ -124,11 +156,12 @@ public class ChewbeccaMcpPublishingTools {
                 "title", field("string", "Titolo accattivante e veritiero per lo Short, max 100 caratteri."),
                 "description", field("string", "Descrizione efficace e veritiera, max 5000 caratteri, hashtag pertinenti."),
                 "publish_at", field("string", "Data e ora ISO 8601 con offset: es. 2026-12-10T19:30:00+01:00, Italia."),
-                "made_for_kids", field("boolean", "Obbligatorio: è un video rivolto specificamente ai bambini?"));
+                "made_for_kids", field("boolean", "Obbligatorio: è un video rivolto specificamente ai bambini?"),
+                "weekly_plan", field("boolean", "True per il flusso della settimana corrente con controllo del calendario e playlist Lo sapevi?. Omettere per una normale programmazione."));
         return McpSchema.Tool.builder()
                 .name("chewbecca_prepare_short")
                 .title("Prepara Short YouTube")
-                .description("CREA SOLO UNA BOZZA (nessun upload). Da un breve riassunto o trascrizione genera tramite ChatGPT titolo efficace ma veritiero e descrizione pertinente; usa la data/ora italiana scelta dall'utente, convertita in ISO 8601 con offset. Mostra anteprima e richiedi conferma esplicita 'CONFERMO <draftId>'. Se manca il contenuto del video, richiedi un riassunto: non dedurlo dal nome del file. Dopo conferma puoi utilizzare chewbecca_schedule_short con il file MP4 allegato.")
+                .description("CREA SOLO UNA BOZZA (nessun upload). Da un breve riassunto o trascrizione genera tramite ChatGPT titolo efficace ma veritiero e descrizione pertinente. Per la serie Lo sapevi? metti nel titolo il dettaglio più curioso e verificato e anticipa nella descrizione il valore del video con pochi hashtag mirati. Usa la data/ora italiana scelta dall'utente, convertita in ISO 8601 con offset. Mostra anteprima e richiedi conferma esplicita 'CONFERMO <draftId>'. Se l'utente chiede programmazione nella settimana corrente senza sovrapposizioni e analisi 4 mesi, chiama PRIMA chewbecca_plan_weekly_short e usa il suo recommended.dateTime come publish_at con weekly_plan=true. made_for_kids=false solo se il video non e' destinato specificamente ai bambini. Se manca il contenuto del video, richiedi un riassunto: non dedurlo dal nome del file. Dopo conferma puoi utilizzare chewbecca_schedule_short con il file MP4 allegato.")
                 .inputSchema(new McpSchema.JsonSchema("object", props,
                         List.of("brief", "title", "description", "publish_at", "made_for_kids"), false, null, null))
                 .annotations(new McpSchema.ToolAnnotations("Prepara Short", false, false, false, false, false))
@@ -156,7 +189,12 @@ public class ChewbeccaMcpPublishingTools {
                         AZIONE DI SCRITTURA REALE su YouTube. Richiede consenso ESPLICITO
                         dell'utente dopo anteprima di titolo, descrizione, madeForKids e
                         data/ora. Carica MP4 allegato come privato con publishAt.
-                        Richiede shorts:write.
+                        Richiede shorts:write. Per le bozze settimanali controlla il calendario
+                        e richiede lo scope Google youtube.force-ssl per la playlist Lo sapevi?.
+                        Per la settimana corrente usa prima chewbecca_plan_weekly_short,
+                        poi prepara la bozza con weekly_plan=true e l'orario proposto.
+                        Mostra anche la playlist prevista prima di chiedere conferma.
+                        Usa made_for_kids=false soltanto se il video non è rivolto ai bambini.
                         Se il risultato è DOWNLOAD_FAILED, interrompi l'operazione:
                         l'upload YouTube NON è iniziato. Mostra all'utente il codice errore.
                         NON aprire YouTube Studio e NON usare browser automation come

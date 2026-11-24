@@ -165,6 +165,19 @@ public class YouTubeAnalyticsClient {
         ))).views();
     }
 
+    public AnalyticsMetrics getShortFirstWeekPerformance(String videoId, LocalDate publicationDay) {
+        LocalDate lastDay = publicationDay.plusDays(6);
+        String metrics = "views,engagedViews,averageViewPercentage,likes,comments,shares,subscribersGained";
+        AnalyticsTable report = queryOptional(new AnalyticsQuery(
+                publicationDay, lastDay, metrics, null, "video==" + videoId, null, null, null
+        ));
+        // Reuse the existing split queries if Google does not return the combined report.
+        if (report.headers().isEmpty()) {
+            return getVideoAggregate(videoId, publicationDay, lastDay);
+        }
+        return firstMetrics(report);
+    }
+
     public AnalyticsMetrics getVideoAggregate(String videoId, LocalDate startDate, LocalDate endDate) {
         String filter = "video==" + videoId;
         AnalyticsMetrics core = firstMetrics(query(new AnalyticsQuery(
