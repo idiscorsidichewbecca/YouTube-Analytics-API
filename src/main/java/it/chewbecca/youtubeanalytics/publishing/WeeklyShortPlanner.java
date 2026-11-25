@@ -65,6 +65,37 @@ public class WeeklyShortPlanner {
             throw new IllegalStateException("Nessuna giornata libera con orari disponibili entro domenica");
         }
 
+        PublicationHistory publicationHistory = publicationHistory(now);
+        List<HistoricalShort> history = publicationHistory.videos();
+        boolean hasEngagedViews = publicationHistory.hasEngagedViews();
+        List<ShortPublicationPlanner.Slot> candidates = rankSlots(availableTimes, publicationHistory);
+        List<ShortPublicationPlanner.Slot> alternatives = new ArrayList<>();
+        for (var candidate : candidates) {
+            if (alternatives.stream().noneMatch(x -> Math.abs(Duration.between(
+                    x.dateTime().toInstant(), candidate.dateTime().toInstant()).toMinutes()) < 120)) {
+                alternatives.add(candidate);
+            }
+            if (alternatives.size() == 3) break;
+        }
+        String methodology = history.isEmpty()
+                ? "Storico utilizzabile assente. A parità di punteggio hanno precedenza le fasce vicine alle 18:30."
+                : "Primi sette giorni. Punteggio con visualizzazioni soprattutto coinvolte (60%), percentuale "
+                        + "media guardata (25%) e interazioni per visualizzazione (15%). Le fasce con pochi esempi "
+                        + "pesano meno. Il dettaglio degli slot conta gli Shorts dello stesso giorno della settimana "
+                        + "pubblicati entro due ore dall'orario proposto.";
+        List<HistoricalShort> examples = history.stream()
+                .sorted(Comparator.comparingDouble((HistoricalShort v) -> performanceScore(v, history, hasEngagedViews)).reversed())
+                .limit(3)
+                .toList();
+        List<SlotEvidence> evidence = alternatives.stream()
+                .map(slot -> evidenceFor(slot.dateTime(), history, hasEngagedViews))
+                .toList();
+        return new WeekPlan(publicationHistory.from(), now, until.minusNanos(1), history.size(), publicationHistory.truncated(),
+                evidence.getFirst().sampleCount() >= 5 ? "MEDIA" : "BASSA", methodology,
+                alternatives.getFirst(), List.copyOf(alternatives), List.copyOf(busyDays), busy, examples, evidence);
+    }
+
+    PublicationHistory publicationHistory(Instant now) {
         Instant historyStart = now.atZone(ROME).minusMonths(4).toInstant();
         LocalDate lastMatureDay = now.atZone(ANALYTICS).toLocalDate().minusDays(2);
         List<YouTubeDataClient.VideoMetadata> eligible = catalog.videos().stream()
@@ -85,7 +116,12 @@ public class WeeklyShortPlanner {
                 history.add(new HistoricalShort(video.videoId(), video.title(), video.publishedAt(), metrics));
             }
         }
-        boolean hasEngagedViews = history.stream().anyMatch(video -> video.metrics().engagedViews() > 0);
+        return new PublicationHistory(historyStart, history, eligible.size() > MAX_SAMPLES);
+    }
+
+    List<ShortPublicationPlanner.Slot> rankSlots(List<ZonedDateTime> availableTimes, PublicationHistory publicationHistory) {
+        List<HistoricalShort> history = publicationHistory.videos();
+        boolean hasEngagedViews = publicationHistory.hasEngagedViews();
         List<ShortPublicationPlanner.HistoryPoint> samples = history.stream()
                 .map(shortVideo -> {
                     var local = shortVideo.publishedAt().atZone(ROME);
@@ -103,33 +139,16 @@ public class WeeklyShortPlanner {
                 .thenComparingDouble(s -> Math.abs(s.dateTime().getHour() +
                         s.dateTime().getMinute()/60.0 - 18.5))
                 .thenComparing(ShortPublicationPlanner.Slot::dateTime));
-        List<ShortPublicationPlanner.Slot> alternatives = new ArrayList<>();
-        for (var candidate : candidates) {
-            if (alternatives.stream().noneMatch(x -> Math.abs(Duration.between(
-                    x.dateTime().toInstant(), candidate.dateTime().toInstant()).toMinutes()) < 120)) {
-                alternatives.add(candidate);
-            }
-            if (alternatives.size() == 3) break;
-        }
-        String methodology = samples.isEmpty()
-                ? "Storico utilizzabile assente. A parità di punteggio hanno precedenza le fasce vicine alle 18:30."
-                : "Primi sette giorni. Punteggio con visualizzazioni soprattutto coinvolte (60%), percentuale "
-                        + "media guardata (25%) e interazioni per visualizzazione (15%). Le fasce con pochi esempi "
-                        + "pesano meno. Il dettaglio degli slot conta gli Shorts dello stesso giorno della settimana "
-                        + "pubblicati entro due ore dall'orario proposto.";
-        List<HistoricalShort> examples = history.stream()
-                .sorted(Comparator.comparingDouble((HistoricalShort v) -> performanceScore(v, history, hasEngagedViews)).reversed())
-                .limit(3)
-                .toList();
-        List<SlotEvidence> evidence = alternatives.stream()
-                .map(slot -> evidenceFor(slot.dateTime(), history, hasEngagedViews))
-                .toList();
-        return new WeekPlan(historyStart, now, until.minusNanos(1), samples.size(), eligible.size() > MAX_SAMPLES,
-                evidence.getFirst().sampleCount() >= 5 ? "MEDIA" : "BASSA", methodology,
-                alternatives.getFirst(), List.copyOf(alternatives), List.copyOf(busyDays), busy, examples, evidence);
+        return candidates;
     }
 
-    private static SlotEvidence evidenceFor(OffsetDateTime candidate, List<HistoricalShort> history,
+    record PublicationHistory(Instant from, List<HistoricalShort> videos, boolean truncated) {
+        boolean hasEngagedViews() {
+            return videos.stream().anyMatch(video -> video.metrics().engagedViews() > 0);
+        }
+    }
+
+    static SlotEvidence evidenceFor(OffsetDateTime candidate, List<HistoricalShort> history,
                                             boolean hasEngagedViews) {
         List<HistoricalShort> comparable = history.stream().filter(video -> {
             ZonedDateTime time = video.publishedAt().atZone(ROME);

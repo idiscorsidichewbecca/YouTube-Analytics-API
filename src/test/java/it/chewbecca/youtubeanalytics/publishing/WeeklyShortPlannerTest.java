@@ -50,8 +50,8 @@ class WeeklyShortPlannerTest {
         Instant scheduledTomorrow = Instant.parse("2026-11-25T19:00:00Z");
         when(catalog.videos()).thenReturn(List.of());
         when(calendar.between(any(), any())).thenReturn(List.of(
-                new YouTubePublicationCalendar.Publication("normalVideo", "Video lungo", publishedToday, false),
-                new YouTubePublicationCalendar.Publication("someShort", "Short", scheduledTomorrow, true)));
+                new YouTubePublicationCalendar.Publication("normalVideo", "Video lungo", publishedToday, false, true),
+                new YouTubePublicationCalendar.Publication("someShort", "Short", scheduledTomorrow, true, true)));
 
         var plan = planner.plan();
 
@@ -66,7 +66,7 @@ class WeeklyShortPlannerTest {
         Instant proposed = Instant.parse("2026-11-26T20:00:00Z");
         when(calendar.between(Instant.parse("2026-11-25T23:00:00Z"), Instant.parse("2026-11-26T23:00:00Z")))
                 .thenReturn(List.of(new YouTubePublicationCalendar.Publication(
-                        "already", "Programmed", nightBeforeInUtc, false)));
+                        "already", "Programmed", nightBeforeInUtc, false, true)));
 
         assertThatThrownBy(() -> planner.assertAvailable(proposed, "current-draft"))
                 .isInstanceOf(IllegalStateException.class)
@@ -85,7 +85,7 @@ class WeeklyShortPlannerTest {
         var sundayClock = Clock.fixed(Instant.parse("2026-11-29T08:00:00Z"), ZoneOffset.UTC);
         var sundayPlanner = new WeeklyShortPlanner(catalog, classifier, analytics, calendar, drafts, sundayClock);
         when(calendar.between(any(), any())).thenReturn(List.of(new YouTubePublicationCalendar.Publication(
-                "existing", "Programmed", Instant.parse("2026-11-29T18:00:00Z"), true)));
+                "existing", "Programmed", Instant.parse("2026-11-29T18:00:00Z"), true, true)));
 
         assertThatThrownBy(sundayPlanner::plan)
                 .isInstanceOf(IllegalStateException.class)

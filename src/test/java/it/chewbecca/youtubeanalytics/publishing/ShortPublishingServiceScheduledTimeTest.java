@@ -16,7 +16,7 @@ class ShortPublishingServiceScheduledTimeTest {
     final ShortPublishingService service = new ShortPublishingService(
             mock(ShortPublicationPlanner.class), mock(ShortMetadataGenerator.class), drafts,
             mock(YouTubeShortUploadClient.class), mock(GoogleAccessTokenService.class),
-            mock(TransactionTemplate.class), now, mock(WeeklyShortPlanner.class));
+            mock(TransactionTemplate.class), now, mock(WeeklyShortPlanner.class), mock(BatchShortPlanner.class));
 
     @Test void userSelectedDateIsPreservedRatherThanRecommendedTime() {
         when(drafts.save(any(ShortDraft.class))).thenAnswer(invocation -> invocation.getArgument(0));

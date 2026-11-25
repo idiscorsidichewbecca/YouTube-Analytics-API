@@ -6,8 +6,12 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface ShortDraftRepository extends JpaRepository<ShortDraft, String> {
+    Optional<ShortDraft> findByBatchIdAndBatchPosition(String batchId, int position);
+    boolean existsByBatchIdAndBatchFileId(String batchId, String fileId);
+
     @Query("""
             select draft from ShortDraft draft
             where draft.publishAt >= :from and draft.publishAt < :until and draft.status <> :ignoredStatus

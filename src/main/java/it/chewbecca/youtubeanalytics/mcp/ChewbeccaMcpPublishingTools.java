@@ -5,6 +5,7 @@ import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import it.chewbecca.youtubeanalytics.chatgpt.OpenAiFileDownloadService;
 import it.chewbecca.youtubeanalytics.chatgpt.TemporaryVideoMultipart;
+import it.chewbecca.youtubeanalytics.publishing.BatchShortPlanner;
 import it.chewbecca.youtubeanalytics.publishing.ShortDraft;
 import it.chewbecca.youtubeanalytics.publishing.ShortPublishingService;
 import it.chewbecca.youtubeanalytics.publishing.YouTubePlaylistService;
@@ -23,6 +24,8 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -82,19 +85,16 @@ public class ChewbeccaMcpPublishingTools {
                         throw new IllegalArgumentException("Manca la conferma esplicita: CONFERMO " + draftId);
                     }
                     ShortDraft draft = publishing.getDraft(draftId);
+                    if (draft.getBatchId() != null) {
+                        throw new IllegalArgumentException("Usa la conferma e lo strumento di programmazione batch");
+                    }
                     if (draft.getStatus() != ShortDraft.Status.DRAFT) {
                         throw new IllegalStateException("Bozza già utilizzata o in stato incerto: " + draft.getStatus());
                     }
                     if (draft.isWeeklyPlan()) {
                         playlists.checkReady();
                     }
-                    Object fileObj = args.get("file");
-                    if (!(fileObj instanceof Map<?, ?> raw)) {
-                        throw new IllegalArgumentException("Allega un file MP4 alla chiamata di programmazione");
-                    }
-                    var file = new OpenAiFileDownloadService.FileInput(
-                            string(raw.get("download_url")), string(raw.get("file_id")),
-                            string(raw.get("mime_type")), string(raw.get("file_name")));
+                    var file = attachment(args.get("file"));
                     // Il download è consentito soltanto per host OpenAI fidati, senza redirect.
                     Path downloaded = files.download(file);
                     try {
@@ -108,30 +108,7 @@ public class ChewbeccaMcpPublishingTools {
                                     "publishAtRome", result.getPublishAt().atZone(ROME).toString()));
                         }
                         ShortDraft result = publishing.scheduleWeekly(draftId, video);
-                        // Ora il video e' gia' persistito SCHEDULED nel DB.
-                        // Eventuali errori nella playlist NON devono innescare un secondo upload.
-                        try {
-                            var assignment = playlists.ensureInTargetPlaylist(result.getYoutubeVideoId());
-                            return ok(json, Map.of(
-                                    "draftId", result.getId(), "status", result.getStatus().name(),
-                                    "videoId", result.getYoutubeVideoId(),
-                                    "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
-                                    "publishAtRome", result.getPublishAt().atZone(ROME).toString(),
-                                    "playlistTitle", assignment.playlistTitle(),
-                                    "playlistStatus", assignment.status(),
-                                    "message", "Short programmato e presente nella playlist " + assignment.playlistTitle()));
-                        } catch (RuntimeException playlistError) {
-                            return ok(json, Map.of(
-                                    "draftId", result.getId(), "status", "SCHEDULED",
-                                    "videoId", result.getYoutubeVideoId(),
-                                    "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
-                                    "publishAtRome", result.getPublishAt().atZone(ROME).toString(),
-                                    "playlistTitle", "Lo sapevi?",
-                                    "playlistStatus", "NEEDS_RETRY",
-                                    "message", "Video gia' programmato su YouTube, ma playlist non confermata. " +
-                                            "NON ricaricare il video. Dopo conferma usa " +
-                                            "chewbecca_repair_short_playlist con il medesimo draftId."));
-                        }
+                        return ok(json, completedWithPlaylist(result, playlists));
                     } finally {
                         try { Files.deleteIfExists(downloaded); } catch (IOException ignored) { }
                     }
@@ -148,6 +125,197 @@ public class ChewbeccaMcpPublishingTools {
                 }
             })
         );
+    }
+
+    @Bean
+    List<McpStatelessServerFeatures.SyncToolSpecification> chewbeccaBatchTools(
+            ShortPublishingService publishing, OpenAiFileDownloadService files, ObjectMapper json,
+            @Value("${app.mcp.public-url}") String mcpBaseUrl, YouTubePlaylistService playlists) {
+        return List.of(
+            new McpStatelessServerFeatures.SyncToolSpecification(prepareBatchTool(), (context, request) -> {
+                try {
+                    Map<String, Object> args = request.arguments();
+                    if (!(args.get("shorts") instanceof List<?> entries) || entries.isEmpty()
+                            || entries.size() > BatchShortPlanner.MAX_BATCH_SIZE) {
+                        throw new IllegalArgumentException("Fornisci da 1 a 10 Shorts");
+                    }
+                    var batchEntries = new ArrayList<ShortPublishingService.BatchEntry>();
+                    for (Object entry : entries) {
+                        if (!(entry instanceof Map<?, ?> fields)) {
+                            throw new IllegalArgumentException("Voce Short non valida");
+                        }
+                        batchEntries.add(new ShortPublishingService.BatchEntry(
+                                required(fields, "filename"), required(fields, "brief"), required(fields, "title"),
+                                required(fields, "description"), requiredBoolean(fields, "made_for_kids")));
+                    }
+                    if (args.containsKey("start_next_week") && !(args.get("start_next_week") instanceof Boolean)) {
+                        throw new IllegalArgumentException("start_next_week deve essere booleano");
+                    }
+                    var preview = publishing.prepareBatch(batchEntries, Boolean.TRUE.equals(args.get("start_next_week")));
+                    var shorts = preview.drafts().stream().map(draft -> Map.of(
+                            "position", draft.getBatchPosition(), "draftId", draft.getId(),
+                            "filename", draft.getBatchFilename(), "title", draft.getTitle(),
+                            "description", draft.getDescription(), "madeForKids", draft.isMadeForKids(),
+                            "publishAtRome", draft.getPublishAt().atZone(ROME).toString(),
+                            "slotEvidence", preview.slots().get(draft.getBatchPosition() - 1))).toList();
+                    return ok(json, Map.of(
+                            "batchId", preview.batchId(), "status", "DRAFT", "shorts", shorts,
+                            "videosAnalyzed", preview.videosAnalyzed(), "historyTruncated", preview.historyTruncated(),
+                            "playlistTitle", "Lo sapevi?", "confirmationText", "CONFERMO BATCH " + preview.batchId()));
+                } catch (RuntimeException e) {
+                    return failure(e);
+                }
+            }),
+            new McpStatelessServerFeatures.SyncToolSpecification(scheduleBatchShortTool(), (context, request) -> {
+                try {
+                    requireWriteScope();
+                    Map<String, Object> args = request.arguments();
+                    String batchId = required(args, "batch_id");
+                    if (!("CONFERMO BATCH " + batchId).equals(required(args, "confirmation_text"))) {
+                        throw new IllegalArgumentException("Manca la conferma esplicita: CONFERMO BATCH " + batchId);
+                    }
+                    if (!(args.get("position") instanceof Number position)
+                            || position.doubleValue() != position.intValue()
+                            || position.intValue() < 1 || position.intValue() > BatchShortPlanner.MAX_BATCH_SIZE) {
+                        throw new IllegalArgumentException("Posizione da 1 a 10 richiesta");
+                    }
+                    ShortDraft draft = publishing.getBatchDraft(batchId, position.intValue());
+                    if (draft.getStatus() != ShortDraft.Status.DRAFT) {
+                        return ok(json, batchStatus(draft));
+                    }
+                    var file = attachment(args.get("file"));
+                    if (StringUtils.hasText(file.fileName()) && !draft.getBatchFilename().equals(file.fileName())) {
+                        throw new IllegalArgumentException("L'allegato non corrisponde alla posizione approvata: "
+                                + draft.getBatchFilename());
+                    }
+                    playlists.checkReady();
+                    Path path = files.download(file);
+                    try {
+                        var video = new TemporaryVideoMultipart(path, "chatgpt-short.mp4");
+                        ShortDraft result;
+                        try {
+                            result = publishing.scheduleBatch(draft, video, file.fileId());
+                        } catch (RuntimeException scheduleError) {
+                            ShortDraft saved = publishing.getBatchDraft(batchId, position.intValue());
+                            if (saved.getStatus() == ShortDraft.Status.DRAFT) throw scheduleError;
+                            return ok(json, batchStatus(saved));
+                        }
+                        Map<String, Object> payload = completedWithPlaylist(result, playlists);
+                        payload.put("batchId", batchId);
+                        payload.put("position", position.intValue());
+                        return ok(json, payload);
+                    } finally {
+                        try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+                    }
+                } catch (OpenAiFileDownloadService.AttachmentDownloadException e) {
+                    return attachmentFailed(e);
+                } catch (SecurityException e) {
+                    return insufficientScope(mcpBaseUrl);
+                } catch (RuntimeException e) {
+                    return failure(e);
+                }
+            })
+        );
+    }
+
+    private static McpSchema.Tool prepareBatchTool() {
+        var itemSchema = Map.of("type", "object", "additionalProperties", false,
+                "properties", Map.of(
+                        "filename", field("string", "Nome esatto del file MP4 allegato"),
+                        "brief", field("string", "Riassunto o trascrizione di questo Short"),
+                        "title", field("string", "Titolo fedele al video, massimo 100 caratteri"),
+                        "description", field("string", "Descrizione con hashtag pertinenti"),
+                        "made_for_kids", field("boolean", "Indica se questo contenuto è rivolto ai bambini")),
+                "required", List.of("filename", "brief", "title", "description", "made_for_kids"));
+        return McpSchema.Tool.builder()
+                .name("chewbecca_prepare_shorts_batch")
+                .title("Prepara fino a 10 Shorts")
+                .description("""
+                        Prepara una sola bozza per 1–10 Short MP4. Scrivi il titolo e la descrizione di
+                        ogni video dal suo contenuto oppure chiedi il riassunto. Passa gli Shorts nell'ordine
+                        di uscita desiderato. Pianifica fino a tre Shorts per settimana italiana, da lunedì
+                        a domenica, contando gli Shorts già pubblicati e programmati, e salta interamente le
+                        giornate che hanno altre uscite. Cerca l'orario con lo storico degli ultimi quattro mesi.
+                        Distribuisci le uscite nelle prime settimane disponibili, partendo dalla corrente salvo
+                        start_next_week=true. Mostra tutte le associazioni file/data, i titoli, le descrizioni,
+                        il pubblico e la playlist Lo sapevi?. Aspetta CONFERMO BATCH <batchId> prima di caricare.
+                        """)
+                .inputSchema(new McpSchema.JsonSchema("object",
+                        Map.of("shorts", Map.of("type", "array", "minItems", 1, "maxItems", 10, "items", itemSchema),
+                                "start_next_week", field("boolean", "Inizia dal prossimo lunedì quando true")),
+                        List.of("shorts"), false, null, null))
+                .annotations(new McpSchema.ToolAnnotations("Prepara batch", false, false, false, false, false))
+                .meta(READ_SECURITY)
+                .build();
+    }
+
+    private static McpSchema.Tool scheduleBatchShortTool() {
+        return McpSchema.Tool.builder()
+                .name("chewbecca_schedule_batch_short")
+                .title("Programma un file del batch confermato")
+                .description("""
+                        Scrive su YouTube. Dopo CONFERMO BATCH <batchId>, chiama una volta per posizione,
+                        in sequenza, usando lo stesso testo di conferma per tutte le posizioni approvate.
+                        Allega proprio il file MP4 della posizione indicata nella bozza. Rilegge giorno e
+                        settimana prima dell'upload. Mostra l'esito di ogni posizione e i videoId disponibili.
+                        Se una posizione è bloccata dal calendario, chiedi conferma per ripianificarla.
+                        Se mostra UNKNOWN o UPLOADING, verifica lo stato prima di riprovare. Se lo Short è
+                        SCHEDULED con NEEDS_RETRY, usa il recupero playlist separato con il suo draftId.
+                        """)
+                .inputSchema(new McpSchema.JsonSchema("object",
+                        Map.of("batch_id", field("string", "ID del batch approvato"),
+                                "position", Map.of("type", "integer", "minimum", 1, "maximum", 10),
+                                "confirmation_text", field("string", "CONFERMO BATCH <batchId>, scritto dall'utente"),
+                                "file", Map.of("$ref", "#/$defs/OpenAIFile")),
+                        List.of("batch_id", "position", "confirmation_text", "file"), false,
+                        Map.of("OpenAIFile", openAiFileSchema()), null))
+                .annotations(new McpSchema.ToolAnnotations("Programma Short del batch", false, false, true, true, false))
+                .meta(Map.of("openai/fileParams", List.of("file"),
+                        "securitySchemes", WRITE_SECURITY.get("securitySchemes")))
+                .build();
+    }
+
+    private static Map<String, Object> batchStatus(ShortDraft draft) {
+        Map<String, Object> status = new LinkedHashMap<>(Map.of(
+                "batchId", draft.getBatchId(), "position", draft.getBatchPosition(),
+                "draftId", draft.getId(), "status", draft.getStatus().name(),
+                "publishAtRome", draft.getPublishAt().atZone(ROME).toString()));
+        if (draft.getYoutubeVideoId() != null) {
+            status.put("videoId", draft.getYoutubeVideoId());
+            status.put("message", "Video già programmato. Se necessario, verifica la playlist con lo strumento di recupero.");
+        } else {
+            status.put("message", "Verifica il canale prima di tentare un nuovo caricamento per questa posizione.");
+        }
+        return status;
+    }
+
+    private static Map<String, Object> completedWithPlaylist(ShortDraft result, YouTubePlaylistService playlists) {
+        var payload = new LinkedHashMap<String, Object>();
+        payload.putAll(Map.of("draftId", result.getId(), "status", result.getStatus().name(),
+                "videoId", result.getYoutubeVideoId(),
+                "youtubeUrl", "https://www.youtube.com/watch?v=" + result.getYoutubeVideoId(),
+                "publishAtRome", result.getPublishAt().atZone(ROME).toString()));
+        try {
+            var assignment = playlists.ensureInTargetPlaylist(result.getYoutubeVideoId());
+            payload.put("playlistTitle", assignment.playlistTitle());
+            payload.put("playlistStatus", assignment.status());
+            payload.put("message", "Short programmato e presente nella playlist " + assignment.playlistTitle());
+        } catch (RuntimeException playlistError) {
+            payload.put("playlistTitle", "Lo sapevi?");
+            payload.put("playlistStatus", "NEEDS_RETRY");
+            payload.put("message", "Video già programmato. Dopo conferma usa chewbecca_repair_short_playlist "
+                    + "con il medesimo draftId per completare l'inserimento in playlist.");
+        }
+        return payload;
+    }
+
+    private static OpenAiFileDownloadService.FileInput attachment(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            throw new IllegalArgumentException("Allega un file MP4 alla chiamata di programmazione");
+        }
+        return new OpenAiFileDownloadService.FileInput(
+                string(raw.get("download_url")), string(raw.get("file_id")),
+                string(raw.get("mime_type")), string(raw.get("file_name")));
     }
 
     private static McpSchema.Tool prepareTool() {
@@ -170,14 +338,6 @@ public class ChewbeccaMcpPublishingTools {
     }
 
     private static McpSchema.Tool scheduleTool() {
-        var file = Map.<String, Object>of(
-                "type", "object", "properties", Map.of(
-                        "download_url", Map.of("type", "string"),
-                        "file_id", Map.of("type", "string"),
-                        "mime_type", Map.of("type", "string"),
-                        "file_name", Map.of("type", "string")),
-                "required", List.of("download_url", "file_id"),
-                "additionalProperties", false);
         var props = Map.<String, Object>of(
                 "draft_id", field("string", "UUID della bozza approvata dall'utente."),
                 "confirmation_text", field("string", "Stringa ESATTA 'CONFERMO <draft_id>' fornita esplicitamente dall'utente."),
@@ -205,7 +365,7 @@ public class ChewbeccaMcpPublishingTools {
                         """)
                 .inputSchema(new McpSchema.JsonSchema("object", props,
                         List.of("draft_id", "confirmation_text", "file"), false,
-                        Map.of("OpenAIFile", file), null))
+                        Map.of("OpenAIFile", openAiFileSchema()), null))
                 .annotations(new McpSchema.ToolAnnotations("Programma Short", false, false, false, true, false))
                 .meta(Map.of(
                         "openai/fileParams", List.of("file"),
@@ -215,16 +375,27 @@ public class ChewbeccaMcpPublishingTools {
                 .build();
     }
 
+    private static Map<String, Object> openAiFileSchema() {
+        return Map.of(
+                "type", "object", "properties", Map.of(
+                        "download_url", Map.of("type", "string"),
+                        "file_id", Map.of("type", "string"),
+                        "mime_type", Map.of("type", "string"),
+                        "file_name", Map.of("type", "string")),
+                "required", List.of("download_url", "file_id"),
+                "additionalProperties", false);
+    }
+
     private static Map<String, Object> field(String type, String description) {
         return Map.of("type", type, "description", description);
     }
     private static String string(Object value) { return value instanceof String s ? s : null; }
-    private static String required(Map<String, Object> args, String name) {
+    private static String required(Map<?, ?> args, String name) {
         String value = string(args.get(name));
         if (!StringUtils.hasText(value)) throw new IllegalArgumentException("Campo obbligatorio: " + name);
         return value.trim();
     }
-    private static boolean requiredBoolean(Map<String, Object> args, String name) {
+    private static boolean requiredBoolean(Map<?, ?> args, String name) {
         if (!(args.get(name) instanceof Boolean value)) {
             throw new IllegalArgumentException("Campo booleano obbligatorio: " + name);
         }

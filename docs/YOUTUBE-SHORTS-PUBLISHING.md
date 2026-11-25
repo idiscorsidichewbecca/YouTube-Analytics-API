@@ -76,3 +76,17 @@ Se il caricamento ha un esito incerto, la bozza passa a `UNKNOWN`: **non ripeter
 - Passa l'orario scelto a `chewbecca_prepare_short` con `weekly_plan=true`. La bozza salva titolo, descrizione e destinazione ai bambini. Mostra l'anteprima e richiedi la conferma esplicita prima di invocare `chewbecca_schedule_short`.
 - All'upload, il backend rilegge l'intera giornata. Se la giornata è ancora libera, programma lo Short e lo aggiunge alla playlist «Lo sapevi?». Per questo flusso occorre concedere lo scope `youtube.force-ssl` su `/admin/youtube/connect`.
 - Se la programmazione riesce e `playlistStatus` vale `NEEDS_RETRY`, usa `chewbecca_repair_short_playlist` con lo stesso ID bozza e la conferma `CONFERMO PLAYLIST <draftId>`. Il recupero usa l'ID YouTube già salvato.
+
+## Programmazione in batch
+
+Allega da 1 a 10 MP4 con nomi distinti e fornisci un riassunto o una trascrizione per ogni video quando serve. Usa `chewbecca_prepare_shorts_batch` per creare una bozza di gruppo con titolo, descrizione, pubblico, nome file e orario italiano per ogni Short. L'ordine dei file determina l'ordine di uscita. Il piano usa le prime settimane con capacità disponibile a partire da quella corrente. `start_next_week=true` comincia dal prossimo lunedì.
+
+Il backend usa lo stesso storico del planner settimanale. Prende i giorni meglio classificati tra quelli liberi e riserva al massimo tre Shorts per settimana, da lunedì a domenica in `Europe/Rome`. Contribuiscono al tetto gli Shorts già pubblicati, quelli programmati e le prenotazioni di upload locali. Un video lungo occupa la sua data. Per riconoscere i contenuti già presenti viene usata la classificazione del canale, con precedenza ai tipi impostati manualmente. I video in elaborazione di durata sconosciuta contano in via prudenziale.
+
+Dopo `CONFERMO BATCH <batchId>`, ChatGPT chiama `chewbecca_schedule_batch_short` una volta per posizione, passando il corrispondente MP4 e la stessa conferma. Il backend rilegge giorno e settimana prima di ogni upload. Le programmazioni riuscite rimangono valide se un'altra posizione si blocca. Riprendere usando lo stesso ID batch e soltanto le posizioni ancora in bozza. Per gli esiti `UNKNOWN` o `UPLOADING`, verificare il canale prima di un nuovo tentativo. Per un errore limitato alla playlist si usa `chewbecca_repair_short_playlist` con l'ID della singola bozza.
+
+La migrazione V6 aggiunge i riferimenti al batch alle bozze nuove. Il tetto settimanale vale per la programmazione tramite batch. Una pubblicazione fatta fuori dal plugin dopo l'ultimo controllo può modificare il calendario.
+
+### Prompt di esempio
+
+> @Chewbecca Studio, prepara in batch questi Shorts nell'ordine in cui li ho allegati. Considera tutta la settimana da lunedì a domenica, con massimo tre Shorts complessivi per settimana contando quelli già usciti o programmati. Usa solo giornate libere e gli orari migliori secondo i dati del canale degli ultimi quattro mesi. Se serve, distribuiscili sulle settimane successive. Prepara titolo e descrizione per ogni video, imposta «Non destinato ai bambini» e usa la playlist «Lo sapevi?». Fammi vedere l'elenco completo e aspetta che ti scriva CONFERMO BATCH con l'ID.

@@ -28,6 +28,14 @@ public class ShortDraft {
     private boolean madeForKids;
     @Column(name = "weekly_plan", nullable = false)
     private boolean weeklyPlan;
+    @Column(name = "batch_id", length = 36)
+    private String batchId;
+    @Column(name = "batch_position")
+    private Integer batchPosition;
+    @Column(name = "batch_filename", length = 255)
+    private String batchFilename;
+    @Column(name = "batch_file_id", length = 133)
+    private String batchFileId;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private Status status;
@@ -55,6 +63,19 @@ public class ShortDraft {
     }
 
     public boolean isWeeklyPlan() { return weeklyPlan; }
+
+    void addToBatch(String batchId, int position, String filename) {
+        useWeeklyPlan();
+        this.batchId = batchId;
+        this.batchPosition = position;
+        this.batchFilename = filename;
+    }
+
+    void bindBatchFile(String fileId) { this.batchFileId = fileId; }
+
+    public String getBatchId() { return batchId; }
+    public Integer getBatchPosition() { return batchPosition; }
+    public String getBatchFilename() { return batchFilename; }
 
     public void startUpload(String title, String description, Instant publishAt, boolean madeForKids) {
         if (status != Status.DRAFT) throw new IllegalStateException("Bozza già inviata o con esito incerto");

@@ -5,7 +5,9 @@ import it.chewbecca.youtubeanalytics.client.YouTubeDataClient;
 import it.chewbecca.youtubeanalytics.config.YoutubeProperties;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 
 @Component
@@ -18,15 +20,21 @@ public class ShortsClassifier {
     }
 
     public Classification classify(YouTubeDataClient.VideoMetadata video) {
-        if (properties.forcedShortIds().contains(video.videoId())) {
+        return classify(video.videoId(), video.publishedAt(), video.durationSeconds(),
+                video.title(), video.description(), video.tags());
+    }
+
+    public Classification classify(String videoId, Instant publishedAt, long duration,
+                                   String title, String description, List<String> tags) {
+        if (properties.forcedShortIds().contains(videoId)) {
             return new Classification(ContentType.SHORT, "MANUAL_OVERRIDE", "HIGH");
         }
-        if (properties.forcedVideoIds().contains(video.videoId())) {
+        if (properties.forcedVideoIds().contains(videoId)) {
             return new Classification(ContentType.VIDEO, "MANUAL_OVERRIDE", "HIGH");
         }
 
-        if (video.publishedAt() != null) {
-            LocalDate publicationDate = video.publishedAt()
+        if (publishedAt != null) {
+            LocalDate publicationDate = publishedAt
                     .atZone(DateRangeResolver.YOUTUBE_ANALYTICS_ZONE)
                     .toLocalDate();
             if (publicationDate.isBefore(properties.shortsDetectionStartDate())) {
@@ -34,12 +42,11 @@ public class ShortsClassifier {
             }
         }
 
-        long duration = video.durationSeconds();
         if (duration > properties.shortsDurationFallbackSeconds()) {
             return new Classification(ContentType.VIDEO, "DURATION_OVER_LIMIT", "HIGH");
         }
 
-        String searchable = (video.title() + " " + video.description() + " " + String.join(" ", video.tags()))
+        String searchable = (title + " " + description + " " + String.join(" ", tags))
                 .toLowerCase(Locale.ROOT);
         if (searchable.contains("#shorts") || searchable.contains("#short")) {
             return new Classification(ContentType.SHORT, "HASHTAG", "HIGH");

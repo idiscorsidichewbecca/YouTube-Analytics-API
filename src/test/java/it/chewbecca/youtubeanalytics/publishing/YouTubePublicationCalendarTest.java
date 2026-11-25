@@ -2,12 +2,16 @@ package it.chewbecca.youtubeanalytics.publishing;
 
 import it.chewbecca.youtubeanalytics.oauth.GoogleAccessTokenService;
 import it.chewbecca.youtubeanalytics.oauth.YoutubeCredential;
+import it.chewbecca.youtubeanalytics.config.YoutubeProperties;
+import it.chewbecca.youtubeanalytics.service.ShortsClassifier;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -23,9 +27,11 @@ class YouTubePublicationCalendarTest {
         when(tokens.getValidAccessToken()).thenReturn("test-token");
         when(tokens.requireCredential()).thenReturn(credential);
         when(credential.getUploadsPlaylistId()).thenReturn("UUexample");
+        var classifier = new ShortsClassifier(new YoutubeProperties(28, 180, true,
+                LocalDate.of(2020, 9, 14), 500, List.of(), List.of()));
         var builder = RestClient.builder();
         var server = MockRestServiceServer.bindTo(builder).build();
-        var calendar = new YouTubePublicationCalendar(builder.build(), tokens);
+        var calendar = new YouTubePublicationCalendar(builder.build(), tokens, classifier);
 
         server.expect(queryParam("playlistId", "UUexample"))
                 .andRespond(withSuccess("""
@@ -35,11 +41,12 @@ class YouTubePublicationCalendarTest {
                           {"contentDetails":{"videoId":"premiere"}}
                         ]}
                         """, MediaType.APPLICATION_JSON));
-        server.expect(queryParam("part", "snippet,status,liveStreamingDetails"))
+        server.expect(queryParam("part", "snippet,status,liveStreamingDetails,contentDetails"))
                 .andRespond(withSuccess("""
                         {"items":[
                           {"id":"scheduled","status":{"privacyStatus":"private","publishAt":"2026-11-26T18:00:00Z"},
-                           "snippet":{"publishedAt":"2026-11-20T09:00:00Z"}},
+                           "snippet":{"publishedAt":"2026-11-20T09:00:00Z"},
+                           "contentDetails":{"duration":"PT45S"}},
                           {"id":"privateDraft","status":{"privacyStatus":"private"},
                            "snippet":{"publishedAt":"2026-11-26T09:00:00Z"}},
                           {"id":"premiere","status":{"privacyStatus":"public"},
@@ -54,6 +61,8 @@ class YouTubePublicationCalendarTest {
                 .containsExactly("scheduled", "premiere");
         assertThat(entries).extracting(YouTubePublicationCalendar.Publication::publishAt)
                 .containsExactly(Instant.parse("2026-11-26T18:00:00Z"), Instant.parse("2026-11-27T18:00:00Z"));
+        assertThat(entries).extracting(YouTubePublicationCalendar.Publication::countsAsShort)
+                .containsExactly(true, false);
         server.verify();
     }
 }
