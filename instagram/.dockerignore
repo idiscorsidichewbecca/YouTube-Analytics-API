@@ -1,8 +1,0 @@
-data/
-.env
-session.json
-__pycache__/
-.pytest_cache/
-.venv/
-tests/
-spring-integration/

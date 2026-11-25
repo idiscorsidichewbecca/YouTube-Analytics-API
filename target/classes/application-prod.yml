@@ -1,9 +1,0 @@
-spring:
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/chewbecca_youtube}
-    username: ${DATABASE_USERNAME:chewbecca}
-    password: ${DATABASE_PASSWORD:chewbecca}
-    driver-class-name: org.postgresql.Driver
-app:
-  security:
-    fail-on-default-secrets: true

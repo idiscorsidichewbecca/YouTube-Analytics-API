@@ -1,6 +1,6 @@
 # Chewbecca Studio — Star Wars Expert Quiz (Meta API ufficiale)
 
-Correzione del modulo cumulativo, da integrare sulla base completa Git d8de6668a9dd1b9990f34b23c83aff95b1ef84b8 tramite lo script di ricostruzione. Nessun Python o API privata. La build integrata deve essere eseguita dopo la ricostruzione.
+Progetto completo, con i sorgenti originali recuperati dall’archivio YouTube-Analytics-API(6) (commit 946b70e), aggiornamenti Shorts e copertine corrispondenti alla versione Live d8de666 e correzione OAuth Meta/calendario Instagram. Nessuna patch o script di ricostruzione necessario. Nessun Python o API privata. La build integrata deve ancora essere verificata: Maven non è disponibile in questo ambiente e il download non è raggiungibile.
 
 ## 1. Collegare Meta — OAuth già esistente
 
