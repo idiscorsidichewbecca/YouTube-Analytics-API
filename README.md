@@ -436,3 +436,7 @@ La release corrente separa i ricavi stimati principali dalle metriche pubblicita
 ## Plugin privato ChatGPT Sites (nuovo)
 
 Per controllare la pubblicazione degli YouTube Shorts interamente da una chat di ChatGPT Plus, usa il bridge REST isolato `/internal/chatgpt/shorts/**` e crea un plugin personale ospitato in ChatGPT Sites. I file di riferimento e i passaggi sono in [`docs/CHATGPT-SITES-CHEWBECCA.md`](docs/CHATGPT-SITES-CHEWBECCA.md). Le richieste di pubblicazione necessitano della chiave separata `CHATGPT_BRIDGE_API_KEY` e della conferma esplicita `CONFERMO <id-bozza>`. **Le Actions del GPT storico e il relativo token non possono pubblicare.**
+
+## Community Manager e Performance Advisor
+
+[Configurazione Render, scope Google, metriche e prompt Chewbecca Studio](docs/community-performance-advisor.md).

@@ -69,7 +69,7 @@ public class SecurityConfig {
                                 "/v3/api-docs/**"
                         ).permitAll()
                         .requestMatchers("/internal/chatgpt/**").hasRole("CHATGPT_PLUGIN")
-                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/admin/**", "/actuator/metrics", "/actuator/metrics/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasRole("GPT")
                         .anyRequest().permitAll()
                 )

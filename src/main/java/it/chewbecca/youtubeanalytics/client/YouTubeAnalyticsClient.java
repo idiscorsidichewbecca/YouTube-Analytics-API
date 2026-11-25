@@ -485,6 +485,49 @@ public class YouTubeAnalyticsClient {
                 .sum();
     }
 
+    /**
+     * Targeted advisor queries expose only values returned by Google. An empty row
+     * or an unsupported report stays distinct from a reported numeric zero.
+     */
+    public List<Map<String, Object>> advisorRows(String videoId, LocalDate from, LocalDate to, String report) {
+        if (!videoId.matches("[A-Za-z0-9_-]{11}")) throw new IllegalArgumentException("ID video non valido");
+        String filter = "video==" + videoId;
+        var request = switch (report) {
+            case "CORE" -> new AnalyticsQuery(from, to, CORE_VIEW_METRICS, null, filter, null, null, null);
+            case "ENGAGEMENT" -> new AnalyticsQuery(from, to, ENGAGEMENT_METRICS, null, filter, null, null, null);
+            case "ENGAGED_VIEWS" -> new AnalyticsQuery(from, to, ENGAGED_VIEWS_METRIC, null, filter, null, null, null);
+            case "DAILY" -> new AnalyticsQuery(from, to, CORE_VIEW_METRICS, "day", filter, "day", null, null);
+            case "MONETARY" -> new AnalyticsQuery(from, to, TOTAL_REVENUE_METRICS, null, filter, null, null, null);
+            case "ADS" -> new AnalyticsQuery(from, to, AD_PERFORMANCE_METRICS, null, filter, null, null, null);
+            case "RETENTION" -> new AnalyticsQuery(from, to, "audienceWatchRatio,relativeRetentionPerformance",
+                    "elapsedVideoTimeRatio", filter, "elapsedVideoTimeRatio", null, null);
+            default -> throw new IllegalArgumentException("Report performance sconosciuto");
+        };
+        return query(request).rows().stream().map(row -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            row.values().forEach((key, value) -> {
+                if (value != null && value.isNumber()) result.put(key, value.numberValue());
+                else if (value != null && value.isTextual()) result.put(key, value.asText());
+            });
+            return result;
+        }).toList();
+    }
+
+    public Map<String, Long> advisorViewTotals(List<String> videoIds, LocalDate from, LocalDate to) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (int offset = 0; offset < videoIds.size(); offset += VIDEO_BATCH_SIZE) {
+            List<String> ids = videoIds.subList(offset, Math.min(offset + VIDEO_BATCH_SIZE, videoIds.size()));
+            var table = query(new AnalyticsQuery(from, to, "views", "video",
+                    "video==" + String.join(",", ids), null, ids.size(), null));
+            for (var row : table.rows()) {
+                var video = row.stringValue("video");
+                var views = row.values().get("views");
+                if (video != null && views != null && views.isNumber()) result.put(video, views.longValue());
+            }
+        }
+        return result;
+    }
+
     private AnalyticsTable queryOptionalRevenue(AnalyticsQuery analyticsQuery, String currency) {
         try {
             return query(analyticsQuery, currency);

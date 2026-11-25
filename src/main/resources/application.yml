@@ -29,7 +29,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
   endpoint:
     health:
       probes:
@@ -40,6 +40,23 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 app:
+  community:
+    enabled: ${APP_COMMUNITY_ENABLED:false}
+    dry-run: ${APP_COMMUNITY_DRY_RUN:true}
+  performance:
+    enabled: ${APP_PERFORMANCE_ENABLED:false}
+    dry-run: ${APP_PERFORMANCE_DRY_RUN:true}
+    reporting-enabled: ${APP_PERFORMANCE_REPORTING_ENABLED:false}
+    reporting-create-job: ${APP_PERFORMANCE_REPORTING_CREATE_JOB:false}
+    reporting-cron: "${APP_PERFORMANCE_REPORTING_CRON:0 20 */6 * * *}"
+    end-screen-reporting-enabled: ${APP_PERFORMANCE_END_SCREEN_REPORTING_ENABLED:false}
+    end-screen-reporting-cron: "${APP_PERFORMANCE_END_SCREEN_REPORTING_CRON:0 45 */6 * * *}"
+    evaluations-enabled: ${APP_PERFORMANCE_EVALUATIONS_ENABLED:false}
+    evaluations-cron: "${APP_PERFORMANCE_EVALUATIONS_CRON:0 10 6 * * *}"
+    email-enabled: ${APP_PERFORMANCE_EMAIL_ENABLED:false}
+    email-cron: "${APP_PERFORMANCE_EMAIL_CRON:0 30 8 * * MON}"
+    email-from: ${APP_PERFORMANCE_EMAIL_FROM:}
+    email-to: ${APP_PERFORMANCE_EMAIL_TO:}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
     client-secret: ${GOOGLE_CLIENT_SECRET}

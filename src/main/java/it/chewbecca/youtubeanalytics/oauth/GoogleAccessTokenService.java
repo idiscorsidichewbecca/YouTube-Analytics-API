@@ -36,6 +36,16 @@ public class GoogleAccessTokenService {
             return cryptoService.decrypt(credential.getEncryptedAccessToken());
         }
 
+        return refresh(credential);
+    }
+
+    @Transactional
+    public synchronized void refreshRejectedToken(String rejectedToken) {
+        YoutubeCredential credential = requireCredential();
+        if (cryptoService.decrypt(credential.getEncryptedAccessToken()).equals(rejectedToken)) refresh(credential);
+    }
+
+    private String refresh(YoutubeCredential credential) {
         String refreshToken = cryptoService.decrypt(credential.getEncryptedRefreshToken());
         GoogleTokenClient.TokenResponse refreshed = tokenClient.refresh(refreshToken);
         credential.updateTokens(
@@ -68,13 +78,16 @@ public class GoogleAccessTokenService {
 
     @Transactional(readOnly = true)
     public void requirePlaylistScope() {
+        requireForceSslScope();
+    }
+
+    @Transactional(readOnly = true)
+    public void requireForceSslScope() {
         YoutubeCredential credential = requireCredential();
         String scopes = credential.getScopes();
-        if (scopes == null || !java.util.List.of(scopes.trim().split("\\s+")).contains(
-                YoutubeOAuthService.PLAYLIST_SCOPE)) {
+        if (scopes == null || !java.util.List.of(scopes.trim().split("\\s+")).contains(YoutubeOAuthService.PLAYLIST_SCOPE)) {
             throw new IllegalArgumentException(
-                    "Scope youtube.force-ssl mancante: ricollega Google da /admin/youtube/connect " +
-                    "per autorizzare la gestione delle playlist");
+                    "Scope youtube.force-ssl mancante: ricollega Google da /admin/youtube/connect.");
         }
     }
 

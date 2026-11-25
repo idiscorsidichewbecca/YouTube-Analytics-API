@@ -3,6 +3,7 @@ package it.chewbecca.youtubeanalytics.oauth;
 import it.chewbecca.youtubeanalytics.client.YouTubeDataClient;
 import it.chewbecca.youtubeanalytics.config.GoogleOAuthProperties;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,19 +33,22 @@ public class YoutubeOAuthService {
     private final YouTubeDataClient dataClient;
     private final YoutubeCredentialRepository repository;
     private final CredentialCryptoService cryptoService;
+    private final ApplicationEventPublisher events;
 
     public YoutubeOAuthService(GoogleOAuthProperties properties,
                                OAuthStateStore stateStore,
                                GoogleTokenClient tokenClient,
                                YouTubeDataClient dataClient,
                                YoutubeCredentialRepository repository,
-                               CredentialCryptoService cryptoService) {
+                               CredentialCryptoService cryptoService,
+                               ApplicationEventPublisher events) {
         this.properties = properties;
         this.stateStore = stateStore;
         this.tokenClient = tokenClient;
         this.dataClient = dataClient;
         this.repository = repository;
         this.cryptoService = cryptoService;
+        this.events = events;
     }
 
     public URI createAuthorizationUri() {
@@ -105,6 +109,9 @@ public class YoutubeOAuthService {
                     selected.uploadsPlaylistId()
             );
         } else {
+            if (!credential.getChannelId().equals(selected.channelId())) {
+                events.publishEvent(new ChannelDisconnected(credential.getChannelId()));
+            }
             credential.reconnect(
                     cryptoService.encrypt(tokens.accessToken()),
                     encryptedRefreshToken,
@@ -122,7 +129,10 @@ public class YoutubeOAuthService {
     @Transactional
     @CacheEvict(cacheNames = {"channelMetadata", "videoCatalog"}, allEntries = true)
     public void disconnect() {
-        repository.findById(YoutubeCredential.SINGLETON_ID).ifPresent(repository::delete);
+        repository.findById(YoutubeCredential.SINGLETON_ID).ifPresent(credential -> {
+            events.publishEvent(new ChannelDisconnected(credential.getChannelId()));
+            repository.delete(credential);
+        });
     }
 
     @Transactional(readOnly = true)
@@ -185,6 +195,8 @@ public class YoutubeOAuthService {
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("nessuno");
     }
+
+    public record ChannelDisconnected(String channelId) {}
 
     public record ConnectionStatus(
             boolean connected,
