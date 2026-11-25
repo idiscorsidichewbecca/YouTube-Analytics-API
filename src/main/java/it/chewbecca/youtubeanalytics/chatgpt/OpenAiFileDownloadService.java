@@ -68,16 +68,22 @@ public class OpenAiFileDownloadService {
     }
 
     URI validate(FileInput file) {
+        return validate(file, false);
+    }
+
+    private URI validate(FileInput file, boolean image) {
         if (file == null || !StringUtils.hasText(file.downloadUrl()) ||
                 !StringUtils.hasText(file.fileId()) || !file.fileId().matches("file_[A-Za-z0-9_-]{8,128}")) {
             throw error(DownloadError.INVALID_FILE, "Allegato ChatGPT mancante o identificativo file non valido");
         }
-        if (file.fileName() != null && !file.fileName().toLowerCase(Locale.ROOT).endsWith(".mp4")) {
-            throw error(DownloadError.INVALID_FILE, "Il file allegato deve essere MP4");
-        }
-        if (StringUtils.hasText(file.mimeType()) && !"video/mp4".equalsIgnoreCase(file.mimeType()) &&
-                !"application/octet-stream".equalsIgnoreCase(file.mimeType())) {
-            throw error(DownloadError.INVALID_FILE, "Il tipo del file allegato non è MP4");
+        String filename = file.fileName() == null ? "" : file.fileName().toLowerCase(Locale.ROOT);
+        String mime = file.mimeType() == null ? "" : file.mimeType().toLowerCase(Locale.ROOT);
+        boolean validName = image ? filename.endsWith(".jpg") || filename.endsWith(".jpeg")
+                || filename.endsWith(".png") : filename.endsWith(".mp4");
+        boolean validMime = image ? mime.equals("image/jpeg") || mime.equals("image/png") : mime.equals("video/mp4");
+        if ((file.fileName() != null && !validName)
+                || (StringUtils.hasText(mime) && !validMime && !mime.equals("application/octet-stream"))) {
+            throw error(DownloadError.INVALID_FILE, image ? "Allega un'immagine JPG o PNG" : "Allega un file MP4");
         }
         URI uri;
         try { uri = URI.create(file.downloadUrl()); }
@@ -105,12 +111,21 @@ public class OpenAiFileDownloadService {
 
     /** Il chiamante deve eliminare il Path nel blocco finally. */
     public Path download(FileInput file) {
-        URI uri = validate(file);
+        return download(file, false);
+    }
+
+    public Path downloadImage(FileInput file) {
+        return download(file, true);
+    }
+
+    private Path download(FileInput file, boolean image) {
+        URI uri = image ? validate(file, true) : validate(file);
+        long maxBytes = image ? 20L * 1024 * 1024 : MAX_FILE_BYTES;
         String host = uri.getHost();
         Path path = null;
         try {
             HttpRequest req = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(12))
-                    .header("Accept", "video/mp4,application/octet-stream,*/*")
+                    .header("Accept", image ? "image/jpeg,image/png,application/octet-stream" : "video/mp4,application/octet-stream,*/*")
                     .GET().build();
             HttpResponse<InputStream> res = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
             int status = res.statusCode();
@@ -130,22 +145,22 @@ public class OpenAiFileDownloadService {
                         "Allegato ChatGPT non scaricabile: HTTP " + status);
             }
             long contentLength = res.headers().firstValueAsLong("Content-Length").orElse(-1L);
-            if (contentLength > MAX_FILE_BYTES) {
+            if (contentLength > maxBytes) {
                 res.body().close();
-                throw error(DownloadError.FILE_TOO_LARGE, "MP4 oltre 300MB");
+                throw error(DownloadError.FILE_TOO_LARGE, image ? "Immagine oltre 20 MB" : "MP4 oltre 300MB");
             }
-            path = Files.createTempFile("chewbecca-chatgpt-", ".mp4");
+            path = Files.createTempFile("chewbecca-chatgpt-", image ? ".img" : ".mp4");
             try (InputStream input = res.body(); var out = Files.newOutputStream(path)) {
                 byte[] chunk = new byte[64 * 1024];
                 long count = 0;
                 int n;
                 while ((n = input.read(chunk)) != -1) {
                     count += n;
-                    if (count > MAX_FILE_BYTES) throw error(DownloadError.FILE_TOO_LARGE, "MP4 oltre 300MB");
+                    if (count > maxBytes) throw error(DownloadError.FILE_TOO_LARGE, image ? "Immagine oltre 20 MB" : "MP4 oltre 300MB");
                     out.write(chunk, 0, n);
                 }
             }
-            if (Files.size(path) < 12 || !isMp4(path)) {
+            if (!image && (Files.size(path) < 12 || !isMp4(path))) {
                 throw error(DownloadError.INVALID_MP4, "L'allegato non contiene un MP4 valido (ftyp mancante)");
             }
             Path completed = path;

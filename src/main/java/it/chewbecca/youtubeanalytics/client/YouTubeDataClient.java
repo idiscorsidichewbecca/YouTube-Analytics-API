@@ -64,6 +64,14 @@ public class YouTubeDataClient {
     }
 
     public List<VideoMetadata> getAllUploadedVideos(String uploadsPlaylistId) {
+        return getAllUploadedVideos(uploadsPlaylistId, false);
+    }
+
+    public List<VideoMetadata> getOwnedUploadsForThumbnailReview(String uploadsPlaylistId) {
+        return getAllUploadedVideos(uploadsPlaylistId, true);
+    }
+
+    private List<VideoMetadata> getAllUploadedVideos(String uploadsPlaylistId, boolean includeFileDetails) {
         String accessToken = accessTokenService.getValidAccessToken();
         List<UploadReference> references = loadUploadReferences(uploadsPlaylistId, accessToken);
         if (references.isEmpty()) {
@@ -74,7 +82,7 @@ public class YouTubeDataClient {
         List<String> ids = references.stream().map(UploadReference::videoId).toList();
         for (int from = 0; from < ids.size(); from += MAX_VIDEO_IDS_PER_REQUEST) {
             int to = Math.min(from + MAX_VIDEO_IDS_PER_REQUEST, ids.size());
-            for (VideoMetadata video : loadVideos(ids.subList(from, to), accessToken)) {
+            for (VideoMetadata video : loadVideos(ids.subList(from, to), accessToken, includeFileDetails)) {
                 videosById.put(video.videoId(), video);
             }
         }
@@ -92,8 +100,16 @@ public class YouTubeDataClient {
     }
 
     public VideoMetadata getVideo(String videoId) {
+        return getVideo(videoId, false);
+    }
+
+    public VideoMetadata getOwnedVideoForThumbnailReview(String videoId) {
+        return getVideo(videoId, true);
+    }
+
+    private VideoMetadata getVideo(String videoId, boolean includeFileDetails) {
         String accessToken = accessTokenService.getValidAccessToken();
-        List<VideoMetadata> videos = loadVideos(List.of(videoId), accessToken);
+        List<VideoMetadata> videos = loadVideos(List.of(videoId), accessToken, includeFileDetails);
         return videos.isEmpty() ? null : videos.getFirst();
     }
 
@@ -125,12 +141,14 @@ public class YouTubeDataClient {
         return result;
     }
 
-    private List<VideoMetadata> loadVideos(List<String> videoIds, String accessToken) {
+    private List<VideoMetadata> loadVideos(List<String> videoIds, String accessToken, boolean includeFileDetails) {
         if (videoIds.isEmpty()) {
             return List.of();
         }
         URI uri = UriComponentsBuilder.fromUriString(BASE_URL + "/videos")
-                .queryParam("part", "snippet,contentDetails,statistics,status")
+                .queryParam("part", includeFileDetails
+                        ? "snippet,contentDetails,statistics,status,fileDetails"
+                        : "snippet,contentDetails,statistics,status")
                 .queryParam("id", String.join(",", videoIds))
                 .queryParam("maxResults", 50)
                 .build()
@@ -199,8 +217,27 @@ public class YouTubeDataClient {
                 statistics.path("viewCount").asLong(0),
                 statistics.path("likeCount").asLong(0),
                 statistics.path("commentCount").asLong(0),
-                true
+                true,
+                snippet.path("channelId").asText(null),
+                parseInstant(status.path("publishAt").asText(null), null),
+                contentDetails.path("hasCustomThumbnail").isBoolean()
+                        ? contentDetails.path("hasCustomThumbnail").booleanValue() : null,
+                displayAspectRatio(item.path("fileDetails").path("videoStreams").path(0))
         );
+    }
+
+    private static Double displayAspectRatio(JsonNode stream) {
+        double ratio = stream.path("aspectRatio").asDouble(0);
+        if (ratio > 0) return ratio;
+        double height = stream.path("heightPixels").asDouble(0);
+        double width = stream.path("widthPixels").asDouble(0);
+        if (width <= 0 || height <= 0) return null;
+        ratio = width / height;
+        return switch (stream.path("rotation").asText("none")) {
+            case "clockwise", "counterClockwise" -> 1 / ratio;
+            case "other" -> null;
+            default -> ratio;
+        };
     }
 
     private Duration parseDuration(String value) {
@@ -279,8 +316,21 @@ public class YouTubeDataClient {
             long lifetimeViews,
             long lifetimeLikes,
             long lifetimeComments,
-            boolean available
+            boolean available,
+            String channelId,
+            Instant scheduledPublishAt,
+            Boolean hasCustomThumbnail,
+            Double displayAspectRatio
     ) {
+        public VideoMetadata(String videoId, String title, String description, Instant publishedAt, Duration duration,
+                             String thumbnailUrl, List<String> tags, String categoryId, String liveBroadcastContent,
+                             String privacyStatus, boolean madeForKids, boolean selfDeclaredMadeForKids,
+                             long lifetimeViews, long lifetimeLikes, long lifetimeComments, boolean available) {
+            this(videoId, title, description, publishedAt, duration, thumbnailUrl, tags, categoryId,
+                    liveBroadcastContent, privacyStatus, madeForKids, selfDeclaredMadeForKids,
+                    lifetimeViews, lifetimeLikes, lifetimeComments, available, null, null, null, null);
+        }
+
         public static VideoMetadata unavailable(String videoId, String title, Instant publishedAt) {
             return new VideoMetadata(
                     videoId,
