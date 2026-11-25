@@ -1,9 +1,0 @@
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/chewbecca-youtube;AUTO_SERVER=TRUE}
-    username: ${DATABASE_USERNAME:chewbecca}
-    password: ${DATABASE_PASSWORD:chewbecca}
-    driver-class-name: org.postgresql.Driver
-app:
-  security:
-    fail-on-default-secrets: true
