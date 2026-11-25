@@ -76,7 +76,7 @@ public class InstagramQuizService {
             var conflict=YouTubeStoryWindows.conflict(story.publishAt.toInstant(),releases);
             if(conflict.isPresent()) throw new IllegalStateException("Conflitto calendario YouTube: quiz "+q.position+" "+story.kind+" (sera protetta "+conflict.get()+"). Batch non programmato; servono nuove date e approvazione.");
         }
-        graph.connection();
+        graph.requirePublishingConnection();
         db.update("UPDATE ig_quiz_story SET status='SCHEDULED' WHERE quiz_id IN (SELECT id FROM ig_quiz WHERE batch_id=?) AND status='DRAFT'",id);
         db.update("UPDATE ig_quiz_batch SET status='SCHEDULED' WHERE id=?",id); return status(id);
     }

@@ -23,23 +23,24 @@ public class InstagramStoryWorker {
     @Scheduled(fixedDelayString="${app.instagram.scheduler-delay-ms:30000}")
     public void publishDue(){
         if(!live)return;
-        db.update("UPDATE ig_quiz_story SET status='UNKNOWN',error_code='INTERRUPTED_WORKER_CHECK_META' WHERE account_id=? AND status='PUBLISHING' AND publish_at<?",graph.account(),now().minusHours(2));
-        db.update("UPDATE ig_quiz_story SET status='MISSED',error_code='PUBLICATION_WINDOW_EXPIRED' WHERE account_id=? AND status='SCHEDULED' AND publish_at<?",graph.account(),now().minusHours(1));
-        db.update("UPDATE ig_quiz_story SET status='BLOCKED',error_code='QUESTION_NOT_PUBLISHED' WHERE account_id=? AND kind='ANSWER' AND status='SCHEDULED' AND publish_at<=? AND EXISTS (SELECT 1 FROM ig_quiz_story q WHERE q.quiz_id=ig_quiz_story.quiz_id AND q.kind='QUESTION' AND q.status IN ('UNKNOWN','FAILED','MISSED','CANCELLED','BLOCKED'))",graph.account(),now());
-        var due=db.query("SELECT id,asset_key FROM ig_quiz_story s WHERE account_id=? AND status='SCHEDULED' AND publish_at<=? AND (kind='QUESTION' OR EXISTS (SELECT 1 FROM ig_quiz_story q WHERE q.quiz_id=s.quiz_id AND q.kind='QUESTION' AND q.status='PUBLISHED')) ORDER BY publish_at LIMIT 2",(r,n)->new Pending(r.getString("id"),r.getString("asset_key")),graph.account(),now());
-        for(var p:due) publishOne(p);
+        final String account; try { account=graph.account(); } catch(RuntimeException e) { return; }
+        db.update("UPDATE ig_quiz_story SET status='UNKNOWN',error_code='INTERRUPTED_WORKER_CHECK_META' WHERE account_id=? AND status='PUBLISHING' AND publish_at<?",account,now().minusHours(2));
+        db.update("UPDATE ig_quiz_story SET status='MISSED',error_code='PUBLICATION_WINDOW_EXPIRED' WHERE account_id=? AND status='SCHEDULED' AND publish_at<?",account,now().minusHours(1));
+        db.update("UPDATE ig_quiz_story SET status='BLOCKED',error_code='QUESTION_NOT_PUBLISHED' WHERE account_id=? AND kind='ANSWER' AND status='SCHEDULED' AND publish_at<=? AND EXISTS (SELECT 1 FROM ig_quiz_story q WHERE q.quiz_id=ig_quiz_story.quiz_id AND q.kind='QUESTION' AND q.status IN ('UNKNOWN','FAILED','MISSED','CANCELLED','BLOCKED'))",account,now());
+        var due=db.query("SELECT id,asset_key FROM ig_quiz_story s WHERE account_id=? AND status='SCHEDULED' AND publish_at<=? AND (kind='QUESTION' OR EXISTS (SELECT 1 FROM ig_quiz_story q WHERE q.quiz_id=s.quiz_id AND q.kind='QUESTION' AND q.status='PUBLISHED')) ORDER BY publish_at LIMIT 2",(r,n)->new Pending(r.getString("id"),r.getString("asset_key")),account,now());
+        for(var p:due) publishOne(p,account);
     }
-    private void publishOne(Pending p){
-        if(db.update("UPDATE ig_quiz_story SET status='PUBLISHING' WHERE id=? AND account_id=? AND status='SCHEDULED' AND publish_at>=?",p.id,graph.account(),now().minusHours(1))!=1)return;
+    private void publishOne(Pending p,String account){
+        if(db.update("UPDATE ig_quiz_story SET status='PUBLISHING' WHERE id=? AND account_id=? AND status='SCHEDULED' AND publish_at>=?",p.id,account,now().minusHours(1))!=1)return;
         boolean publishAttempted=false;
         try {
             if(!checkCalendar(p))return;
-            graph.connection();
-            String container=graph.createStory(publicUrl+"/instagram-media/"+p.assetKey);
+            graph.requirePublishingConnection(account);
+            String container=graph.createStory(account,publicUrl+"/instagram-media/"+p.assetKey);
             db.update("UPDATE ig_quiz_story SET container_id=? WHERE id=? AND status='PUBLISHING'",container,p.id);
             boolean ready=false;
             for(int i=0;i<12;i++){
-                String state=graph.containerStatus(container);
+                String state=graph.containerStatus(account,container);
                 if("FINISHED".equals(state)){ready=true;break;}
                 if(!"IN_PROGRESS".equals(state))throw new IllegalStateException("META_CONTAINER_NOT_READY");
                 Thread.sleep(5000);
@@ -47,7 +48,7 @@ public class InstagramStoryWorker {
             if(!ready)throw new IllegalStateException("META_CONTAINER_TIMEOUT");
             if(!checkCalendar(p))return;
             publishAttempted=true;
-            String mediaId=graph.publish(container);
+            String mediaId=graph.publish(account,container);
             db.update("UPDATE ig_quiz_story SET status='PUBLISHED',media_id=?,published_at=?,error_code=NULL WHERE id=? AND status='PUBLISHING'",mediaId,now(),p.id);
         }catch(Exception ex){
             if(ex instanceof InterruptedException)Thread.currentThread().interrupt();
@@ -81,9 +82,10 @@ public class InstagramStoryWorker {
     @Scheduled(fixedDelayString="${app.instagram.insights-delay-ms:300000}")
     public void collectInsights(){
         if(!live)return;
-        var rows=db.query("SELECT id,media_id FROM ig_quiz_story WHERE account_id=? AND status='PUBLISHED' AND reach_count IS NULL AND published_at<=? AND published_at>? ORDER BY published_at LIMIT 10",(r,n)->new Pending(r.getString("id"),r.getString("media_id")),graph.account(),now().minusHours(20),now().minusHours(21));
+        final String account; try { account=graph.account(); } catch(RuntimeException e) { return; }
+        var rows=db.query("SELECT id,media_id FROM ig_quiz_story WHERE account_id=? AND status='PUBLISHED' AND reach_count IS NULL AND published_at<=? AND published_at>? ORDER BY published_at LIMIT 10",(r,n)->new Pending(r.getString("id"),r.getString("media_id")),account,now().minusHours(20),now().minusHours(21));
         for(var p:rows){try{
-            Long value=graph.reach(p.assetKey); if(value!=null)db.update("UPDATE ig_quiz_story SET reach_count=?,reach_at=? WHERE id=? AND reach_count IS NULL AND published_at>?",value,now(),p.id,now().minusHours(21));
+            Long value=graph.reach(account,p.assetKey); if(value!=null)db.update("UPDATE ig_quiz_story SET reach_count=?,reach_at=? WHERE id=? AND reach_count IS NULL AND published_at>?",value,now(),p.id,now().minusHours(21));
         }catch(RuntimeException ignored){/* missing data never becomes zero; next poll may recover */}}
     }
 }

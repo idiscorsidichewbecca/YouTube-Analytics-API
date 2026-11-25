@@ -1,25 +1,25 @@
 # Chewbecca Studio — Star Wars Expert Quiz (Meta API ufficiale)
 
-Patch cumulativa sulla versione Copertine YouTube / Senza Instagram. Nessun Python, Instagrapi, API privata o password Instagram. Tutti i 22 file preesistenti sono intatti. La base ricevuta non contiene pom.xml, configurazione di sicurezza completa o bootstrap MCP: il modulo non è ancora verificato come build integrata.
+Correzione del modulo cumulativo, da integrare sulla base completa Git d8de6668a9dd1b9990f34b23c83aff95b1ef84b8 tramite lo script di ricostruzione. Nessun Python o API privata. La build integrata deve essere eseguita dopo la ricostruzione.
 
-## 1. Collegare Meta
+## 1. Collegare Meta — OAuth già esistente
 
-Usare un account Instagram **Business**, con app Meta e prodotto Instagram API con Instagram Login. Configurare e autorizzare per l'account gestito dall'app gli scope `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_insights`. Ottenere un Instagram User Access Token (preferibilmente long-lived) attraverso il flusso ufficiale di Meta / dashboard. Questo modulo usa il token come segreto ambiente; **non include ancora la UI/callback OAuth di autorizzazione, rinnovo automatico o archivio cifrato del token**. Rinnovare e sostituire il token su Render prima della scadenza. Non inserire token in Git, URL, chat o log. Un token Facebook Login/Unified Login non va usato al posto del token Instagram Login: verificare la configurazione disponibile nel proprio dashboard. La pubblicazione resta disabilitata di default.
+Il modulo riusa Facebook Login for Business, `MetaAccessTokenService`, `MetaGraphClient` e la credenziale cifrata già presente in PostgreSQL. Il client usa `graph.facebook.com`, `META_GRAPH_API_VERSION`, token Pagina e `appsecret_proof`. Non sono necessari un secondo account, un secondo OAuth o un token separato. Il token scaduto richiede riconnessione tramite `/admin/meta/connect` (nessun nuovo rinnovo automatico implementato).
 
-Documentazione: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing — https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login — https://developers.facebook.com/docs/insights/overview/ — https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
+Per pubblicare storie occorre un account Instagram Business idoneo collegato alla Pagina e il permesso `instagram_content_publish` concesso alla configurazione Meta Login for Business esistente. Per lettura e Insights verificare `instagram_basic`, `pages_read_engagement`, `instagram_manage_insights` ed eventuali ulteriori requisiti/approvazioni Meta. Se manca il permesso di pubblicazione, modificare la configurazione associata a `META_CONFIG_ID`, ripetere `/admin/meta/connect` e verificare `/admin/meta/status` e `chewbecca_instagram_connection_status` (`publishPermission`). La presenza dello scope non garantisce che Meta autorizzi ogni asset: serve collaudo reale. Nessuna pubblicazione di prova automatica.
 
-Variabili Render sul servizio Java già esistente (nessun nuovo servizio):
+Configurazioni Render (conservare quelle Meta e MCP esistenti):
 
 ```
+META_ENABLED=true
 APP_INSTAGRAM_ENABLED=true
 APP_INSTAGRAM_LIVE_ENABLED=false
-APP_INSTAGRAM_ACCOUNT_ID=<ID Instagram restituito da GET /me>
-APP_INSTAGRAM_ACCESS_TOKEN=<segreto ufficiale>
-APP_INSTAGRAM_GRAPH_VERSION=v27.0
-APP_INSTAGRAM_PUBLIC_URL=https://<host-del-backend-Render>
+APP_INSTAGRAM_PUBLIC_URL=https://youtube-analytics-api.onrender.com
 ```
 
-Verificare versione abilitata dall'app Meta; configurabile. Il modulo usa `graph.instagram.com`, il token nell'header Authorization e chiamate ufficiali media/media_publish/insights. Provare `chewbecca_instagram_connection_status` e staging prima di passare `APP_INSTAGRAM_LIVE_ENABLED=true`. In modalità disabilitata si possono preparare bozze, ma non approvare scheduling né pubblicare. Non cambiare l'account con batch in corso senza annullare le programmazioni. Mantieni il servizio Render sempre attivo e PostgreSQL disponibile. Non è necessario Quartz: il polling @Scheduled con claim SQL e tabella persistente garantisce che le date sopravvivano al riavvio; non garantisce esecuzione se il servizio è spento. Verificare che V8 sia la prossima versione libera. Eseguire build/test Maven e verificare che Spring AI registri la lista dei nuovi SyncToolSpecification, poi aggiornare/reimportare il plugin MCP se necessario. Sono riutilizzati gli scope esistenti `shorts:read` e `shorts:write` per l'accesso privato del proprietario; non sono gli scope Meta. Verificare che il bootstrap MCP li aggreghi come per le copertine e che la catena di sicurezza rispetti la route media.
+`APP_INSTAGRAM_PUBLIC_URL` ha fallback a `MCP_PUBLIC_URL`. Non servono `APP_INSTAGRAM_ACCOUNT_ID`, `APP_INSTAGRAM_ACCESS_TOKEN`, `APP_INSTAGRAM_GRAPH_VERSION`. In modalità non live si possono preparare bozze, non programmare o pubblicare. Attivare live solo dopo test e approvazione. Nessun Python, API privata o password Instagram. Usare un servizio Render sempre attivo e PostgreSQL; verificare V8, build Maven e registrazione effettiva MCP prima del rilascio. Gli scope MCP `shorts:read` e `shorts:write` restano quelli già presenti; non sono permessi Meta.
+
+Documentazione: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/content-publishing/
 
 ## 2. Flusso editoriale batch
 

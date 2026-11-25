@@ -1,63 +1,66 @@
 package it.chewbecca.youtubeanalytics.instagram;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
+import it.chewbecca.youtubeanalytics.meta.client.MetaGraphClient;
+import it.chewbecca.youtubeanalytics.meta.oauth.MetaAccessTokenService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.*;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Component
 @ConditionalOnProperty(name="app.instagram.enabled", havingValue="true")
 public class InstagramGraphClient {
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
-    private final ObjectMapper json;
-    private final String version, account, token;
-    public InstagramGraphClient(ObjectMapper json, @Value("${app.instagram.graph-version:v27.0}") String version,
-            @Value("${app.instagram.account-id}") String account, @Value("${app.instagram.access-token}") String token) {
-        if (!version.matches("v[0-9]+\\.[0-9]+") || !account.matches("[0-9]{5,64}") || token.isBlank()) throw new IllegalArgumentException("Configurazione Instagram non valida");
-        this.json=json; this.version=version; this.account=account; this.token=token;
+    private final MetaGraphClient graph;
+    private final MetaAccessTokenService tokens;
+    public InstagramGraphClient(MetaGraphClient graph, MetaAccessTokenService tokens) {
+        this.graph=graph; this.tokens=tokens;
     }
-    String account() { return account; }
-    public record Connection(String accountId, String username, boolean verified) {}
-    public Connection connection() {
-        var data = request("GET", "/me?fields=user_id,username", Map.of());
-        String id=data.path("user_id").asText(data.path("id").asText(""));
-        if (!account.equals(id)) throw new IllegalStateException("Il token non appartiene all'account configurato");
-        return new Connection(id,data.path("username").asText(""),true);
+    String account() { return safeId(tokens.requireCredential().getInstagramAccountId()); }
+    public record Connection(String accountId, String username, boolean verified, boolean publishPermission) {}
+    public Connection connection() { return connection(account(),false); }
+    public Connection requirePublishingConnection() { return connection(account(),true); }
+    public Connection requirePublishingConnection(String expected) { return connection(expected,true); }
+    private Connection connection(String expected, boolean publish) {
+        String token=token(expected,publish);
+        var credential=tokens.requireCredential();
+        if(!expected.equals(credential.getInstagramAccountId()))throw new GraphFailure("META_ACCOUNT_CHANGED");
+        boolean allowed=MetaAccessTokenService.hasInstagramPublishPermission(credential);
+        var data=get("/"+safeId(expected),token,Map.of("fields","id,username"));
+        if(!expected.equals(data.path("id").asText()))throw new GraphFailure("META_ACCOUNT_MISMATCH");
+        return new Connection(expected,data.path("username").asText(""),true,allowed);
     }
-    public String createStory(String imageUrl) { return id(request("POST", "/"+account+"/media", Map.of("media_type","STORIES","image_url",imageUrl))); }
-    public String containerStatus(String id) { return request("GET", "/"+safeId(id)+"?fields=status_code", Map.of()).path("status_code").asText("UNKNOWN"); }
-    public String publish(String id) { return id(request("POST", "/"+account+"/media_publish", Map.of("creation_id",safeId(id)))); }
-    public Long reach(String mediaId) {
-        var response=request("GET", "/"+safeId(mediaId)+"/insights?metric=reach",Map.of());
-        for (var metric:response.path("data")) {
-            if (!"reach".equals(metric.path("name").asText())) continue;
+    public String createStory(String expected,String imageUrl) {
+        return id(post("/"+safeId(expected)+"/media",token(expected,true),Map.of("media_type","STORIES","image_url",imageUrl)));
+    }
+    public String containerStatus(String expected,String id) {
+        return get("/"+safeId(id),token(expected,true),Map.of("fields","status_code")).path("status_code").asText("UNKNOWN");
+    }
+    public String publish(String expected,String id) {
+        return id(post("/"+safeId(expected)+"/media_publish",token(expected,true),Map.of("creation_id",safeId(id))));
+    }
+    public Long reach(String expected,String mediaId) {
+        var response=get("/"+safeId(mediaId)+"/insights",token(expected,false),Map.of("metric","reach"));
+        for(var metric:response.path("data")){
+            if(!"reach".equals(metric.path("name").asText()))continue;
             var value=metric.path("values").path(0).path("value");
-            if (!value.isIntegralNumber()) value=metric.path("total_value").path("value");
-            if (value.isIntegralNumber() && value.asLong()>=0) return value.asLong();
+            if(!value.isIntegralNumber())value=metric.path("total_value").path("value");
+            if(value.isIntegralNumber()&&value.asLong()>=0)return value.asLong();
         }
         return null;
     }
-    private JsonNode request(String method,String path, Map<String,String> fields) {
-        var builder=HttpRequest.newBuilder(URI.create("https://graph.instagram.com/"+version+path)).timeout(Duration.ofSeconds(40)).header("Authorization","Bearer "+token).header("Accept","application/json");
-        if (method.equals("POST")) builder.header("Content-Type","application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(fields.entrySet().stream().map(e -> enc(e.getKey())+"="+enc(e.getValue())).collect(Collectors.joining("&"))));
-        try {
-            var result=http.send(builder.build(),HttpResponse.BodyHandlers.ofString());
-            var body=json.readTree(result.body());
-            if (result.statusCode()/100!=2 || body.has("error")) throw new GraphFailure("META_HTTP_"+result.statusCode()+"_CODE_"+body.path("error").path("code").asInt(0));
-            return body;
-        } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new GraphFailure("META_INTERRUPTED"); }
-        catch (java.io.IOException e) { throw new GraphFailure("META_NETWORK_OR_RESPONSE_ERROR"); }
+    private String token(String expected,boolean publish) {
+        try{return tokens.getPageAccessTokenForInstagram(expected,publish);}
+        catch(RuntimeException e){throw new GraphFailure(publish?"META_CONNECTION_OR_PUBLISH_PERMISSION_REQUIRED":"META_CONNECTION_REQUIRED");}
     }
-    private static String enc(String s) { return URLEncoder.encode(s,StandardCharsets.UTF_8); }
-    private static String id(JsonNode data) { return safeId(data.path("id").asText("")); }
-    private static String safeId(String id) { if (id==null || !id.matches("[0-9]{1,64}")) throw new GraphFailure("META_INVALID_ID"); return id; }
-    public static class GraphFailure extends RuntimeException { GraphFailure(String code) { super(code); } }
+    private JsonNode get(String path,String token,Map<String,?> params){
+        try{return graph.get(path,token,params,"Instagram Expert Quiz");}
+        catch(RuntimeException e){throw new GraphFailure("META_READ_FAILED_CHECK_CONNECTION_AND_PERMISSIONS");}
+    }
+    private JsonNode post(String path,String token,Map<String,String> params){
+        try{return graph.post(path,token,params,"Instagram Expert Quiz");}
+        catch(RuntimeException e){throw new GraphFailure("META_WRITE_FAILED_CHECK_CONNECTION_AND_PERMISSIONS");}
+    }
+    private static String id(JsonNode data){return safeId(data.path("id").asText(""));}
+    private static String safeId(String id){if(id==null||!id.matches("[0-9]{1,100}"))throw new GraphFailure("META_INVALID_ID");return id;}
+    public static class GraphFailure extends RuntimeException { GraphFailure(String code){super(code);} }
 }
