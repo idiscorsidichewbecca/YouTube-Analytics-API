@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import it.chewbecca.youtubeanalytics.client.GoogleApiException;
 import it.chewbecca.youtubeanalytics.client.YouTubeStudioClient;
 import it.chewbecca.youtubeanalytics.oauth.GoogleAccessTokenService;
 import it.chewbecca.youtubeanalytics.thumbnail.ThumbnailService;
@@ -18,8 +19,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -175,11 +180,73 @@ public class VideoOptimizationService {
                         repository.evaluations(draft.id()).stream().map(this::decode).toList())).toList();
     }
 
+    public List<VideoOptimizationRepository.EditorialMemory> editorialHistory(String videoId) {
+        return repository.editorialHistory(advisor.channel(), videoId);
+    }
+
+    public void recordEditorialNote(String id, String note) {
+        if (note == null || note.isBlank() || note.length() > 2000) {
+            throw new IllegalArgumentException("La nota editoriale deve contenere da 1 a 2000 caratteri");
+        }
+        String owner = advisor.channel();
+        var draft = repository.draft(owner, id);
+        advisor.owned(draft.videoId());
+        repository.saveEditorialNote(owner, id, note.strip(), clock.instant());
+    }
+
+    public RecentReview reviewRecent(int page, int limit, boolean refresh) {
+        if (page < 1 || limit < 1 || limit > 10) throw new IllegalArgumentException("Usa page >= 1 e limit da 1 a 10");
+        Instant cutoff = clock.instant().minus(Duration.ofDays(30));
+        // Include older changes when testing whether the before window was affected.
+        var applied = repository.applied(advisor.channel(), cutoff.minus(Duration.ofDays(30)));
+        var groups = new LinkedHashMap<ChangeDay, List<Draft>>();
+        for (var draft : applied) {
+            var key = new ChangeDay(draft.videoId(), reportingDay(draft.appliedAt()));
+            groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(draft);
+        }
+        var recent = groups.entrySet().stream().filter(group -> !group.getValue().getFirst().appliedAt().isBefore(cutoff))
+                .toList();
+        long offset = (page - 1L) * limit;
+        var reviews = recent.stream().skip(offset).limit(limit)
+                .map(group -> review(group.getKey(), group.getValue(), applied, refresh)).toList();
+        return new RecentReview(cutoff, page, recent.size(), offset + limit < recent.size(), reviews,
+                "Confronti osservativi. Le modifiche dello stesso video nello stesso giorno sono valutate insieme.");
+    }
+
+    private InterventionReview review(ChangeDay key, List<Draft> group, List<Draft> applied, boolean refresh) {
+        var changes = group.stream().sorted(Comparator.comparing(Draft::appliedAt).thenComparing(Draft::id))
+                .map(draft -> new Change(draft.id(), draft.action(), draft.reason(), draft.appliedAt())).toList();
+        int days = List.of(28, 14, 7).stream()
+                .filter(window -> !key.date().plusDays(window).isAfter(advisor.lastConservativeDay()))
+                .findFirst().orElse(7);
+        var before = new Window(key.date().minusDays(days), key.date().minusDays(1));
+        var after = new Window(key.date().plusDays(1), key.date().plusDays(days));
+        var overlap = applied.stream().filter(draft -> draft.videoId().equals(key.videoId()))
+                .filter(draft -> {
+                    var day = reportingDay(draft.appliedAt());
+                    return !day.equals(key.date()) && !day.isBefore(before.from()) && !day.isAfter(after.to());
+                }).map(Draft::id).toList();
+        Evaluation evaluation;
+        try {
+            evaluation = evaluate(group.getFirst().id(), days, refresh);
+        } catch (GoogleApiException error) {
+            if (error.getStatusCode() != 404) throw error;
+            evaluation = new Evaluation(group.getFirst().id(), days, "VIDEO_UNAVAILABLE", before, after, null, null);
+        } catch (IllegalArgumentException unavailable) {
+            evaluation = new Evaluation(group.getFirst().id(), days, "VIDEO_UNAVAILABLE", before, after, null, null);
+        }
+        return new InterventionReview(key.videoId(), key.date(), changes, overlap, evaluation);
+    }
+
+    private static LocalDate reportingDay(Instant value) {
+        return value.atZone(PerformanceAdvisor.PACIFIC).toLocalDate();
+    }
+
     public synchronized Evaluation evaluate(String id, int days, boolean refresh) {
         if (!List.of(7, 14, 28).contains(days)) throw new IllegalArgumentException("Finestre ammesse: 7, 14 o 28 giorni");
         var draft = repository.draft(advisor.channel(), id);
         if (!"APPLIED".equals(draft.state())) throw new IllegalArgumentException("Serve un intervento applicato");
-        LocalDate change = draft.appliedAt().atZone(PerformanceAdvisor.PACIFIC).toLocalDate();
+        LocalDate change = reportingDay(draft.appliedAt());
         var after = new Window(change.plusDays(1), change.plusDays(days));
         var before = new Window(change.minusDays(days), change.minusDays(1));
         if (after.to().isAfter(advisor.lastConservativeDay())) {
@@ -241,6 +308,13 @@ public class VideoOptimizationService {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data)); }
         catch (NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
+
+    private record ChangeDay(String videoId, LocalDate date) {}
+    public record Change(String id, String action, String reason, Instant appliedAt) {}
+    public record InterventionReview(String videoId, LocalDate date, List<Change> changes,
+                                     List<String> overlappingChangeIds, Evaluation comparison) {}
+    public record RecentReview(Instant from, int page, int total, boolean hasNext, List<InterventionReview> items,
+                               String interpretation) {}
 
     public record Preview(String id, String videoId, String action, int revision, String status, String reason,
                           String previous, List<String> options, List<String> confirmations) {}

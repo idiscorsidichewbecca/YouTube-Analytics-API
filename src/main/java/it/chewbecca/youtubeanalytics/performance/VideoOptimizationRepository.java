@@ -56,6 +56,29 @@ public class VideoOptimizationRepository {
                 """, this::draft, channel, utc(after));
     }
 
+    public List<EditorialMemory> editorialHistory(String channel, String videoId) {
+        return jdbc.query("""
+                select id, action, rationale, applied_value, applied_at, editorial_note, editorial_note_at
+                from advisor_optimization where channel_id=? and video_id=? and state='APPLIED'
+                order by applied_at desc, id limit 20
+                """, (rs, row) -> new EditorialMemory(rs.getString(1), rs.getString(2), rs.getString(3),
+                rs.getString(4), rs.getObject(5, OffsetDateTime.class).toInstant(), rs.getString(6),
+                rs.getObject(7, OffsetDateTime.class)), channel, videoId);
+    }
+
+    @Transactional
+    public void saveEditorialNote(String channel, String id, String note, Instant now) {
+        if (jdbc.update("""
+                update advisor_optimization set editorial_note=?, editorial_note_at=?
+                where channel_id=? and id=? and state='APPLIED'
+                """, note, utc(now), channel, id) != 1) {
+            throw new IllegalArgumentException("Intervento applicato non trovato");
+        }
+    }
+
+    public record EditorialMemory(String id, String action, String reason, String appliedValue, Instant appliedAt,
+                                  String editorialNote, OffsetDateTime editorialNoteAt) {}
+
     public Set<String> pendingOrCooling(String channel, Instant since) {
         return new HashSet<>(jdbc.queryForList("""
                 select video_id from advisor_optimization where channel_id=?

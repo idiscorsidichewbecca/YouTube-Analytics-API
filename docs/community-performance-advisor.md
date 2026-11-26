@@ -115,3 +115,11 @@ Il backend produce dati e proposte salvate, con report periodico opzionale. Non 
 > Analizza i video lunghi pubblicati negli ultimi tre mesi. Scorri l'audit e approfondisci le cinque opportunità con più evidenza. Se proponi miniature, usa i riferimenti Chewbecca e mostrami tre alternative per video.
 
 > Prepara il report settimanale Chewbecca. Completa il censimento commenti se il campione del report è parziale, individua le opportunità con dati sufficienti e verifica gli interventi maturi a 7, 14 e 28 giorni. Mostrami ogni proposta prima di pubblicare o modificare.
+
+### Memoria editoriale degli interventi
+
+`chewbecca_review_recent_optimizations` mostra gli interventi applicati negli ultimi 30 giorni, raggruppati per video e giorno Pacific. Usa la più lunga tra le finestre mature di 7, 14 e 28 giorni, esclude il giorno dell'intervento e segnala altre modifiche nelle finestre confrontate. Se nessuna finestra è matura, l'intervento rimane in attesa. Questo confronto è osservativo.
+
+`chewbecca_record_optimization_note` conserva una nota editoriale approvata dall'utente nello storico persistente. La nota va scritta come conclusione editoriale, senza copie delle metriche o dei metadati letti da YouTube. Le bozze scadute, i valori precedenti letti da YouTube e le rilevazioni temporanee continuano a seguire la pulizia a 28 giorni. Le note vengono cancellate se si disconnette il canale. `chewbecca_analyze_video_performance` mostra la memoria editoriale degli interventi già applicati prima di consigliare altri cambiamenti.
+
+> Controlla le modifiche fatte negli ultimi 30 giorni e confronta i dati prima e dopo. Se due cambiamenti sono stati fatti insieme, valutali come un unico intervento. Indica quali conclusioni vale la pena conservare nello storico.

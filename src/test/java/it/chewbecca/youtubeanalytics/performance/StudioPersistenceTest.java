@@ -66,6 +66,28 @@ class StudioPersistenceTest {
     }
 
     @Test
+    void keepsEditorialMemoryWhenTemporaryOptimizationDataExpires() {
+        var title = edits.create(draft("1", "TITLE"), List.of());
+        assertThat(edits.claim(title, "Nuovo titolo", now)).isTrue();
+        edits.baseline(title, "{}");
+        edits.finish(title, "APPLIED", "Nuovo titolo", now, null, true);
+        edits.saveEvaluation(title.id(), 7, now, "{}");
+        edits.saveEditorialNote("owner", title.id(), "Provare un titolo più esplicito sui gradi.", now);
+
+        edits.purgeExpiredData(now.plusSeconds(1));
+
+        assertThat(edits.evaluations(title.id())).isEmpty();
+        assertThat(edits.draft("owner", title.id()).beforeMetrics()).isNull();
+        assertThat(edits.draft("owner", title.id()).previous()).isNull();
+        assertThat(edits.editorialHistory("owner", title.videoId())).singleElement()
+                .satisfies(memory -> {
+                    assertThat(memory.appliedValue()).isEqualTo("Nuovo titolo");
+                    assertThat(memory.editorialNote()).contains("più esplicito");
+                });
+        assertThat(edits.editorialHistory("different-channel", title.videoId())).isEmpty();
+    }
+
+    @Test
     void aggregatesEndScreensAcrossElementsAndRetainsUpstreamMetadata() throws Exception {
         var rows = EndScreenReportingRepository.parse(new StringReader("""
                 date,channel_id,video_id,end_screen_element_type,end_screen_element_impressions,end_screen_element_clicks

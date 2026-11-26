@@ -59,9 +59,15 @@ public class ChewbeccaPerformanceMcpTools {
                 tool.tool("chewbecca_analyze_video_performance", DATA + """
                         Restituisce ipotesi numeriche A–E. Mostra titolo, copertina, confronto, priorità e fattori
                         alternativi. Interpreta possibili incoerenze tra promessa e contenuto con il contesto.
+                        Prima di suggerire un nuovo intervento, leggi lo storico incluso e verifica se quello precedente
+                        ha dati maturi. Usa la nota editoriale come contesto, non come una metrica di YouTube.
                         Usa 1, 2, 7 o 28 giorni di calendario. Non affermare un rapporto causale.
-                        """, age, List.of("video_id"), READ,
-                        args -> out(advisor.analyze(required(args, "video_id"), num(args, "age_days", 7)))),
+                        """, age, List.of("video_id"), READ, args -> {
+                            String videoId = required(args, "video_id");
+                            ObjectNode diagnosis = json.valueToTree(advisor.analyze(videoId, num(args, "age_days", 7)));
+                            diagnosis.set("editorialHistory", json.valueToTree(edits.editorialHistory(videoId)));
+                            return out(diagnosis);
+                        }),
                 tool.tool("chewbecca_audit_channel_performance", DATA + """
                         Esamina tutti gli upload pubblicati nel periodo per formato VIDEO o SHORT e pagina la graduatoria.
                         Controlla hasNext. Usa l'analisi del video per confermare o scartare gli interventi prioritari.
@@ -72,10 +78,17 @@ public class ChewbeccaPerformanceMcpTools {
                 tool.tool("chewbecca_optimization_context", DATA + """
                         Fornisce la descrizione, lo stile delle copertine e, quando disponibile, il transcript
                         del video lungo. Per le miniature riusa i riferimenti grafici esistenti del canale e
-                        genera in ChatGPT tre proposte distinte. Usa solo dettagli pertinenti al video.
-                        """, Map.of("video_id", text(), "with_caption", bool()), List.of("video_id"), READ,
-                        args -> out(edits.context(required(args, "video_id"), !Boolean.FALSE.equals(args.get("with_caption"))))),
+                        genera in ChatGPT tre proposte distinte. Usa solo dettagli pertinenti al video e considera
+                        gli interventi già provati e le note editoriali prima di proporre un nuovo cambiamento.
+                        """, Map.of("video_id", text(), "with_caption", bool()), List.of("video_id"), READ, args -> {
+                            String videoId = required(args, "video_id");
+                            ObjectNode context = json.valueToTree(edits.context(videoId,
+                                    !Boolean.FALSE.equals(args.get("with_caption"))));
+                            context.set("editorialHistory", json.valueToTree(edits.editorialHistory(videoId)));
+                            return out(context);
+                        }),
                 tool.tool("chewbecca_prepare_video_optimization", DATA + """
+                        Prima di preparare una proposta, consulta lo storico in chewbecca_optimization_context.
                         Registra una sola azione per bozza: tre titoli alternativi fedeli (max 100 caratteri),
                         una descrizione o tre miniature orizzontali A/B/C di un video lungo. Mostra opzioni e
                         motivazione e chiedi l'approvazione separata per ciascun intervento che verrà applicato.
@@ -102,7 +115,29 @@ public class ChewbeccaPerformanceMcpTools {
                         args -> out(edits.apply(required(args, "optimization_id"), num(args, "revision", 0),
                                 required(args, "choice"), required(args, "confirmation_text"), yes(args, "dry_run")))),
                 tool.tool("chewbecca_optimization_history", DATA + "Elenca interventi, metadati documentati e misure precedenti e successive.",
-                        video, List.of("video_id"), READ, args -> out(edits.history(required(args, "video_id")))),
+                        video, List.of("video_id"), READ, args -> {
+                            String videoId = required(args, "video_id");
+                            return out(Map.of("items", edits.history(videoId),
+                                    "editorialHistory", edits.editorialHistory(videoId)));
+                        }),
+                tool.tool("chewbecca_review_recent_optimizations", DATA + """
+                        Riesamina le modifiche applicate negli ultimi 30 giorni, per video e giorno. Confronta la
+                        finestra più lunga disponibile tra 7, 14 e 28 giorni, escludendo il giorno dell'intervento,
+                        e segnala altri interventi che si sovrappongono alle finestre. Mostra anche i confronti in
+                        attesa. Interpreta impressioni, CTR, views e watch time in chat. Se ci sono modifiche
+                        ravvicinate, attribuisci l'andamento al periodo e non a una singola azione.
+                        """, Map.of("page", integer(), "limit", integer(), "refresh", bool()), List.of(), DRAFT,
+                        args -> out(edits.reviewRecent(num(args, "page", 1), num(args, "limit", 4), yes(args, "refresh")))),
+                tool.tool("chewbecca_record_optimization_note", DATA + """
+                        Memorizza nel database una nota editoriale dell'utente su un intervento applicato. Usa
+                        solo un testo mostrato e approvato dall'utente. La nota dura oltre la finestra dei dati
+                        temporanei. Non includere dati grezzi di YouTube. Non modifica il video.
+                        """, Map.of("optimization_id", text(), "note", text()), List.of("optimization_id", "note"),
+                        APPROVAL, args -> {
+                            String id = required(args, "optimization_id");
+                            edits.recordEditorialNote(id, required(args, "note"));
+                            return out(Map.of("optimizationId", id, "status", "SAVED"));
+                        }),
                 tool.tool("chewbecca_evaluate_optimization", """
                         Confronta 7, 14 o 28 giorni prima e dopo, escludendo il giorno dell'intervento. La raccolta
                         aggiorna la valutazione locale e non scrive su YouTube. Controlla disponibilità e fattori
