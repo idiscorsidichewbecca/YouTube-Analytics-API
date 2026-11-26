@@ -124,4 +124,30 @@ class OpenAiFileDownloadServiceTest {
         assertThat(OpenAiFileDownloadService.isValidFileId("a".repeat(133))).isTrue();
     }
 
+    @Test void allowsObservedAzureRegionalAccountsWithoutEnvironmentUpdates() {
+        for (String host : List.of("oaisdmntprdenmarkeast.blob.core.windows.net",
+                "oaisdmntprpolandcentral.blob.core.windows.net")) {
+            assertThat(service.validate(input("https://" + host + "/video.mp4?sig=hidden")).getHost())
+                    .isEqualTo(host);
+        }
+    }
+
+    @Test void rejectsUnverifiedAzureAccountsAndSpoofedHosts() {
+        for (String host : List.of("unrelated.blob.core.windows.net",
+                "oaisdmntprunverified.blob.core.windows.net",
+                "oaisdmntprpolandcentral.blob.core.windows.net.evil.example",
+                "oaisdmntprpolandcentral.evil.blob.core.windows.net")) {
+            assertThatThrownBy(() -> service.validate(input("https://" + host + "/video.mp4")))
+                    .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                    .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.HOST_NOT_ALLOWED);
+        }
+    }
+
+    @Test void allowsAdditionalExplicitlyConfiguredAzureAccount() {
+        var configured = new OpenAiFileDownloadService(
+                new ChatGptBridgeProperties(false, "", List.of("verifiedaccount.blob.core.windows.net")));
+        assertThat(configured.validate(input("https://verifiedaccount.blob.core.windows.net/video.mp4")).getHost())
+                .isEqualTo("verifiedaccount.blob.core.windows.net");
+    }
+
 }
