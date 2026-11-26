@@ -23,4 +23,4 @@ COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 10000
 
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=40.0", "-XX:InitialRAMPercentage=10.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]

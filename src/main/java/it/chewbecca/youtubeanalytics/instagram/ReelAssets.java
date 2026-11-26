@@ -1,6 +1,8 @@
 package it.chewbecca.youtubeanalytics.instagram;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.FileSystemResource;
@@ -24,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 @ConditionalOnProperty(name = {"app.instagram.enabled", "app.instagram.reels-enabled"}, havingValue = "true")
 public class ReelAssets {
+    private static final Logger log = LoggerFactory.getLogger(ReelAssets.class);
     static final String VIDEO = "reel.mp4";
     static final String COVER = "cover.jpg";
     private static final long CAPACITY = 280L * 1024 * 1024;
@@ -60,7 +63,7 @@ public class ReelAssets {
         Files.createDirectory(dir);
         try {
             Path probe = dir.resolve("probe.json");
-            run(List.of("ffprobe", "-v", "error", "-show_entries",
+            run("probe", List.of("ffprobe", "-v", "error", "-threads", "1", "-show_entries",
                     "stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,field_order,sample_rate,channels:format=duration",
                     "-of", "json", input.toString()), probe, 20);
             var info = json.readTree(probe.toFile());
@@ -87,26 +90,29 @@ public class ReelAssets {
             boolean copyAudio = audio.isEmpty() || audio.filter(n -> "aac".equals(n.path("codec_name").asText())
                     && n.path("channels").asInt() <= 2 && n.path("sample_rate").asInt() <= 48000).isPresent();
             Path output = dir.resolve(VIDEO);
-            var command = new java.util.ArrayList<>(List.of("ffmpeg", "-v", "error", "-nostdin", "-threads", "2",
+            var command = new java.util.ArrayList<>(List.of("ffmpeg", "-v", "error", "-nostdin", "-filter_threads", "1", "-filter_complex_threads", "1", "-threads", "1",
                     "-i", input.toString(), "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1"));
             command.addAll(copyVideo ? List.of("-c:v", "copy") : List.of("-vf",
                     "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30",
-                    "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-threads", "2",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-threads", "1",
                     "-crf", "22", "-maxrate", "5M", "-bufsize", "10M", "-g", "60"));
             command.addAll(copyAudio ? List.of("-c:a", "copy") : List.of("-c:a", "aac", "-ar", "48000", "-ac", "2"));
             command.addAll(List.of("-fs", Long.toString(VIDEO_LIMIT + 1),
                     "-use_editlist", "0", "-movflags", "+faststart", output.toString()));
-            run(command, null, 105);
+            log.info("REEL_PROCESSING videoCopy={} audioCopy={} width={} height={}", copyVideo, copyAudio, width, height);
+            run("normalize", command, null, 105);
             if (Files.size(output) > VIDEO_LIMIT || storedBytes() > CAPACITY) {
                 throw new IllegalArgumentException("Video elaborato oltre lo spazio disponibile");
             }
             Path frame = dir.resolve("frame.jpg");
             double at = Math.max(0, Math.min(coverSecond, duration - 0.5));
-            run(List.of("ffmpeg", "-v", "error", "-nostdin", "-threads", "2", "-ss",
+            run("extract_frame", List.of("ffmpeg", "-v", "error", "-nostdin", "-filter_threads", "1", "-filter_complex_threads", "1", "-threads", "1", "-ss",
                     String.format(Locale.ROOT, "%.3f", at), "-i", output.toString(), "-frames:v", "1",
                     "-vf", "scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2,crop=1080:1920",
                     "-threads", "1", "-q:v", "2", frame.toString()), null, 25);
+            logMemory("render_cover", "start");
             renderCover(frame, dir.resolve(COVER), headline, template);
+            logMemory("render_cover", "complete");
             Files.delete(frame);
             Files.delete(probe);
         } catch (IOException | RuntimeException ex) {
@@ -130,20 +136,48 @@ public class ReelAssets {
         }
     }
 
-    private static void run(List<String> command, Path output, int seconds) throws IOException {
+    private static void run(String stage, List<String> command, Path output, int seconds) throws IOException {
+        logMemory(stage, "start");
         var builder = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD);
         if (output == null) builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
         else builder.redirectOutput(output.toFile());
         var process = builder.start();
         try {
-            if (process.waitFor(seconds, TimeUnit.SECONDS) && process.exitValue() == 0) return;
+            if (process.waitFor(seconds, TimeUnit.SECONDS)) {
+                int exitCode = process.exitValue();
+                log.info("REEL_PROCESSING stage={} exitCode={}", stage, exitCode);
+                if (exitCode == 0) return;
+            } else {
+                log.warn("REEL_PROCESSING stage={} timeoutSeconds={}", stage, seconds);
+            }
             throw new IllegalArgumentException("Il file MP4 non è elaborabile entro i limiti del servizio");
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IOException("Elaborazione Reel interrotta", ex);
         } finally {
-            if (process.isAlive()) process.destroyForcibly();
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                try { process.waitFor(5, TimeUnit.SECONDS); }
+                catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            }
+            logMemory(stage, "end");
         }
+    }
+
+    private static void logMemory(String stage, String event) {
+        Runtime runtime = Runtime.getRuntime();
+        long containerBytes = -1;
+        for (String file : List.of("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes")) {
+            try {
+                containerBytes = Long.parseLong(Files.readString(Path.of(file)).trim());
+                break;
+            } catch (IOException | NumberFormatException ignored) {
+                // Memory accounting is optional outside Linux containers.
+            }
+        }
+        log.info("REEL_PROCESSING stage={} event={} heapUsedMiB={} heapMaxMiB={} containerUsedMiB={}",
+                stage, event, (runtime.totalMemory() - runtime.freeMemory()) / 1048576,
+                runtime.maxMemory() / 1048576, containerBytes < 0 ? -1 : containerBytes / 1048576);
     }
 
     private static void renderCover(Path frame, Path output, String headline, ReelCoverTemplate template) throws IOException {
@@ -156,8 +190,13 @@ public class ReelAssets {
             template.overlay(graphics, headline);
         } finally {
             graphics.dispose();
+            image.flush();
         }
-        if (!ImageIO.write(cover, "JPEG", output.toFile())) throw new IOException("JPEG non disponibile");
+        try {
+            if (!ImageIO.write(cover, "JPEG", output.toFile())) throw new IOException("JPEG non disponibile");
+        } finally {
+            cover.flush();
+        }
     }
 
     public FileSystemResource read(String key, String asset) {
