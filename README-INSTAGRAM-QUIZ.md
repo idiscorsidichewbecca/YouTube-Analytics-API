@@ -56,3 +56,13 @@ Il backend usa il canale Google già autorizzato, la playlist uploads paginata e
 - Worker: snapshot prima di creare il container e di nuovo immediatamente prima di `media_publish`, controllando l'orario effettivo e, per la domanda, anche l'orario pianificato della risposta. Conflitto = `BLOCKED / YOUTUBE_EVENING_CONFLICT_YYYY-MM-DD`; dati Google indisponibili = `BLOCKED / YOUTUBE_CALENDAR_UNAVAILABLE`. Non pubblica, non sposta e non riprova automaticamente; le risposte di domande bloccate seguono la regola preesistente. Controllo puntuale, non lock distribuito con YouTube: una nuova uscita programmata dopo il controllo o dopo la pubblicazione Instagram può ancora creare sovrapposizione, non viene cancellata una storia già online. Le bozze YouTube non ancora caricate o non ancora programmate su YouTube non sono visibili. Non modifica i tool di pubblicazione YouTube.
 
 `sh verifiche-instagram/run-smoke.sh` include 17 controlli calendario autonomi (limiti, video/Short, slittamenti, giorni riservati, DST) oltre agli 8 preesistenti. I controlli del servizio e worker richiedono la build/test sul repository Maven completo e l'account Google reale.
+
+
+## Modalità manuale (quiz singolo)
+
+- `chewbecca_prepare_manual_quiz`: passa `quiz` (continuity, question, answer, source), `question_publish_at` (`NOW` o ISO-8601 italiano con offset), e facoltativamente `answer_publish_at` (ISO-8601 italiano con offset). Se omesso, non viene creata alcuna storia risposta.
+- `chewbecca_stage_quiz_question`: carica solo la grafica della domanda per un batch con una sola storia. Per una coppia si usa il tool precedente `chewbecca_stage_quiz_graphics`.
+- `chewbecca_preview_quiz_graphics`: mostra le immagini registrate, una o due.
+- `chewbecca_schedule_quiz_batch`: richiede sempre la conferma esatta della revisione. NOW indica l'orario di approvazione (stesso giorno italiano della bozza), non la data di creazione. Il worker pubblica alla successiva elaborazione utile, con i tempi tecnici Meta. Gli orari manuali non sono spostati automaticamente: i conflitti con il calendario YouTube sono bloccanti.
+- Lo storico e l'elenco batch restituiscono un oggetto JSON con array `items`, anche quando vuoto.
+- Nessuna migrazione DB richiesta: la modalità è registrata in slot_evidence. Una domanda singola conserva la soluzione e la fonte nello storico, ma non pubblica la risposta.
