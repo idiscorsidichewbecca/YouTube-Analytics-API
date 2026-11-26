@@ -86,4 +86,25 @@ class OpenAiFileDownloadServiceTest {
                 .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
                 .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_FILE);
     }
+
+    @Test void distinguishesMissingUrlFromMissingOrMalformedId() {
+        assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
+                null, "file_12345678", "video/mp4", "reel.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .hasMessageContaining("downloadUrlPresent=false")
+                .hasMessageContaining("fileIdValid=true");
+        assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
+                "https://files.oaiusercontent.com/video.mp4?sig=secret-token", null, "video/mp4", "reel.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .hasMessageContaining("downloadUrlPresent=true")
+                .hasMessageContaining("fileIdPresent=false")
+                .hasMessageNotContaining("secret-token");
+        assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
+                "https://files.oaiusercontent.com/video.mp4", "invalid-secret-id", "video/mp4", "reel.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .hasMessageContaining("fileIdPresent=true")
+                .hasMessageContaining("fileIdValid=false")
+                .hasMessageNotContaining("invalid-secret-id");
+    }
+
 }

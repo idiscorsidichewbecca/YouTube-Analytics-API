@@ -94,6 +94,7 @@ public class ChewbeccaMcpPublishingTools {
                     if (draft.isWeeklyPlan()) {
                         playlists.checkReady();
                     }
+                    OpenAiFileDownloadService.diagnoseAttachment("youtube_short", args.get("file"));
                     var file = attachment(args.get("file"));
                     // Il download è consentito soltanto per host OpenAI fidati, senza redirect.
                     Path downloaded = files.download(file);
@@ -183,6 +184,7 @@ public class ChewbeccaMcpPublishingTools {
                     if (draft.getStatus() != ShortDraft.Status.DRAFT) {
                         return ok(json, batchStatus(draft));
                     }
+                    OpenAiFileDownloadService.diagnoseAttachment("youtube_batch_short", args.get("file"));
                     var file = attachment(args.get("file"));
                     if (StringUtils.hasText(file.fileName()) && !draft.getBatchFilename().equals(file.fileName())) {
                         throw new IllegalArgumentException("L'allegato non corrisponde alla posizione approvata: "
