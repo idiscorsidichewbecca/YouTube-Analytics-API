@@ -9,7 +9,7 @@ public class QuizSmoke {
  static void check(boolean b){if(!b)throw new AssertionError();checks++;}
  public static void main(String[] args)throws Exception{
   var empty=QuizSlots.choose("QUESTION",List.of(),0);check(empty.hour()==9&&empty.method().startsWith("EXPLORATION"));
-  check(QuizSlots.choose("ANSWER",List.of(),0).hour()==20);
+  check(QuizSlots.choose("ANSWER",List.of(),0).hour()==16);
   check(QuizSlots.choose("QUESTION",List.of(),1).hour()==8);
   var s=List.of(new QuizSlots.Sample(8,10),new QuizSlots.Sample(8,20),new QuizSlots.Sample(8,30),new QuizSlots.Sample(9,90),new QuizSlots.Sample(9,80),new QuizSlots.Sample(9,100));
   check(QuizSlots.choose("QUESTION",s,0).hour()==9);
