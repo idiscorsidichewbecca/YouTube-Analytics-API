@@ -162,6 +162,7 @@ public class OpenAiFileDownloadService {
         long maxBytes = image ? 20L * 1024 * 1024 : MAX_FILE_BYTES;
         String host = uri.getHost();
         Path path = null;
+        log.info("MCP_FILE_DOWNLOAD stage=start image={}", image);
         try {
             HttpRequest req = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(12))
                     .header("Accept", image ? "image/jpeg,image/png,application/octet-stream" : "video/mp4,application/octet-stream,*/*")
@@ -202,6 +203,7 @@ public class OpenAiFileDownloadService {
             if (!image && (Files.size(path) < 12 || !isMp4(path))) {
                 throw error(DownloadError.INVALID_MP4, "L'allegato non contiene un MP4 valido (ftyp mancante)");
             }
+            log.info("MCP_FILE_DOWNLOAD stage=complete bytes={} image={}", Files.size(path), image);
             Path completed = path;
             path = null;
             return completed;
