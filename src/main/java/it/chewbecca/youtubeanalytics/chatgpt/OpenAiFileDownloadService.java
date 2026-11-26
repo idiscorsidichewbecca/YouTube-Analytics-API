@@ -48,6 +48,25 @@ public class OpenAiFileDownloadService {
                             @JsonProperty("mime_type") String mimeType,
                             @JsonProperty("file_name") String fileName) {}
 
+    /**
+     * Diagnose the raw MCP attachment shape without logging any supplied values,
+     * unknown key names, filenames, signed URLs, IDs or credentials.
+     */
+    public static void diagnoseAttachment(String operation, Object attachment) {
+        java.util.Map<?, ?> raw = attachment instanceof java.util.Map<?, ?> map ? map : java.util.Map.of();
+        var knownKeys = java.util.List.of("download_url", "file_id", "mime_type", "file_name",
+                "downloadUrl", "fileId", "mimeType", "fileName", "id", "url");
+        var receivedKeys = knownKeys.stream().filter(raw::containsKey).toList();
+        String shape = attachment == null ? "missing" : attachment instanceof java.util.Map ? "object"
+                : attachment instanceof String ? "string" : attachment instanceof java.util.List ? "array" : "other";
+        boolean urlPresent = raw.get("download_url") instanceof String url && StringUtils.hasText(url);
+        boolean idPresent = raw.get("file_id") instanceof String id && StringUtils.hasText(id);
+        boolean idValid = raw.get("file_id") instanceof String id && id.matches("file_[A-Za-z0-9_-]{8,128}");
+        log.info("MCP_ATTACHMENT_DIAGNOSTICS operation={} shape={} attachmentPresent={} receivedKeys={} unknownKeyCount={} downloadUrlPresent={} fileIdPresent={} fileIdValid={}",
+                operation, shape, attachment != null, receivedKeys, raw.size() - receivedKeys.size(),
+                urlPresent, idPresent, idValid);
+    }
+
     public enum DownloadError {
         INVALID_FILE, INVALID_URL, HOST_NOT_ALLOWED, REDIRECT_BLOCKED,
         HTTP_ERROR, FILE_TOO_LARGE, INVALID_MP4, NETWORK_ERROR, INTERRUPTED
