@@ -50,16 +50,17 @@ class InstagramReelScheduleTest {
         var schedule = new InstagramReelSchedule(db, graph, assets, clock, true);
         Path first = Files.writeString(staging.resolve("first.mp4"), "video first");
         Path second = Files.writeString(staging.resolve("second.mp4"), "video second");
-        var a = schedule.schedule(first, "Titolo A", "Descrizione", "TESTO A", 2).receipt();
-        var b = schedule.schedule(second, "Titolo B", "Descrizione", "TESTO B", 2).receipt();
-        var retry = schedule.schedule(first, "Altro titolo", "Descrizione", "TESTO C", 2).receipt();
+        var a = schedule.schedule(first, "Titolo A", "Descrizione", "TESTO A", 2, ReelCoverTemplate.PERSONAGGIO).receipt();
+        var b = schedule.schedule(second, "Titolo B", "Descrizione", "TESTO B", 2, ReelCoverTemplate.LUOGO).receipt();
+        var retry = schedule.schedule(first, "Altro titolo", "Descrizione", "TESTO C", 2, ReelCoverTemplate.EVENTO).receipt();
         assertEquals("SCHEDULED", a.reel().state());
         assertEquals(ZoneOffset.ofHours(1), a.reel().publishAt().getOffset());
         assertEquals(a.reel().id(), retry.reel().id());
         assertEquals("Titolo A\n\nDescrizione", retry.reel().caption());
         assertNotEquals(a.reel().publishAt().toLocalDate(), b.reel().publishAt().toLocalDate());
         assertEquals(2, schedule.status(null).size());
-        verify(assets, times(2)).store(anyString(), any(), anyString(), anyDouble());
+        verify(assets).store(anyString(), eq(first), eq("TESTO A"), eq(2.0), eq(ReelCoverTemplate.PERSONAGGIO));
+        verify(assets).store(anyString(), eq(second), eq("TESTO B"), eq(2.0), eq(ReelCoverTemplate.LUOGO));
         verify(graph, never()).publish(anyString(), anyString());
     }
 
@@ -67,7 +68,7 @@ class InstagramReelScheduleTest {
     void usesMetaCustomCoverAndNeverRetriesAnUncertainPublish() throws Exception {
         var schedule = new InstagramReelSchedule(db, graph, assets, clock, true);
         var reel = schedule.schedule(Files.writeString(staging.resolve("first.mp4"), "video"),
-                "Titolo", "Descrizione", "TESTO", 2).receipt().reel();
+                "Titolo", "Descrizione", "TESTO", 2, ReelCoverTemplate.PERSONAGGIO).receipt().reel();
         var worker = new InstagramReelWorker(db, graph, assets, clock, "https://example.com", true);
         when(clock.instant()).thenReturn(reel.publishAt().minusMinutes(5).toInstant());
         when(graph.createReel(eq("123"), endsWith("/reel.mp4"), endsWith("/cover.jpg"), eq(reel.caption())))

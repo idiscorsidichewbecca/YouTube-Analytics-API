@@ -7,12 +7,7 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;
-import java.awt.AlphaComposite;
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.GradientPaint;
 import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -53,7 +48,8 @@ public class ReelAssets {
         }
     }
 
-    public synchronized void store(String key, Path input, String headline, double coverSecond) throws IOException {
+    public synchronized void store(String key, Path input, String headline, double coverSecond,
+                                   ReelCoverTemplate template) throws IOException {
         if (Files.size(input) > VIDEO_LIMIT) throw new IllegalArgumentException("MP4 oltre il limite di 100 MiB");
         Files.createDirectories(root);
         if (storedBytes() + Files.size(input) + 2_000_000 > CAPACITY
@@ -110,7 +106,7 @@ public class ReelAssets {
                     String.format(Locale.ROOT, "%.3f", at), "-i", output.toString(), "-frames:v", "1",
                     "-vf", "scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2,crop=1080:1920",
                     "-threads", "1", "-q:v", "2", frame.toString()), null, 25);
-            renderCover(frame, dir.resolve(COVER), headline);
+            renderCover(frame, dir.resolve(COVER), headline, template);
             Files.delete(frame);
             Files.delete(probe);
         } catch (IOException | RuntimeException ex) {
@@ -150,50 +146,18 @@ public class ReelAssets {
         }
     }
 
-    static void renderCover(Path frame, Path output, String headline) throws IOException {
+    private static void renderCover(Path frame, Path output, String headline, ReelCoverTemplate template) throws IOException {
         BufferedImage image = ImageIO.read(frame.toFile());
         if (image == null) throw new IOException("Fotogramma non decodificabile");
         var cover = new BufferedImage(1080, 1920, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = cover.createGraphics();
+        Graphics2D graphics = cover.createGraphics();
         try {
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.drawImage(image, 0, 0, 1080, 1920, null);
-            g.setPaint(new GradientPaint(0, 770, new Color(0, 0, 0, 0), 0, 1325, new Color(0, 0, 0, 235)));
-            g.fillRect(0, 770, 1080, 1150);
-            g.setComposite(AlphaComposite.SrcOver);
-            var words = headline.toUpperCase(Locale.ITALIAN).split("\\s+");
-            int split = 1;
-            int delta = Integer.MAX_VALUE;
-            for (int i = 1; i < words.length; i++) {
-                int difference = Math.abs(line(words, 0, i).length() - line(words, i, words.length).length());
-                if (difference < delta) {
-                    delta = difference;
-                    split = i;
-                }
-            }
-            if (words.length == 1) drawLine(g, words[0], 1150, new Color(255, 211, 38));
-            else {
-                drawLine(g, line(words, 0, split), 1060, Color.WHITE);
-                drawLine(g, line(words, split, words.length), 1190, new Color(255, 211, 38));
-            }
-        } finally { g.dispose(); }
+            graphics.drawImage(image, 0, 0, 1080, 1920, null);
+            template.overlay(graphics, headline);
+        } finally {
+            graphics.dispose();
+        }
         if (!ImageIO.write(cover, "JPEG", output.toFile())) throw new IOException("JPEG non disponibile");
-    }
-
-    private static String line(String[] words, int start, int end) {
-        return String.join(" ", java.util.Arrays.copyOfRange(words, start, end));
-    }
-
-    private static void drawLine(Graphics2D g, String text, int y, Color fill) {
-        Font font = new Font("DejaVu Sans", Font.BOLD, 120);
-        g.setFont(font);
-        int width = g.getFontMetrics().stringWidth(text);
-        if (width > 910) g.setFont(font.deriveFont(120f * 910 / width));
-        int x = (1080 - g.getFontMetrics().stringWidth(text)) / 2;
-        g.setColor(Color.BLACK);
-        g.drawString(text, x + 4, y + 5);
-        g.setColor(fill);
-        g.drawString(text, x, y);
     }
 
     public FileSystemResource read(String key, String asset) {

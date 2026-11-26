@@ -60,7 +60,7 @@ public class InstagramReelSchedule {
     }
 
     public ScheduledReel schedule(Path video, String title, String description, String headline,
-                                 double frameSeconds) throws IOException {
+                                 double frameSeconds, ReelCoverTemplate template) throws IOException {
         String account = requireSchedulingPermission();
         title = text(title, 120, "Titolo");
         description = text(description, 2080, "Descrizione");
@@ -86,7 +86,7 @@ public class InstagramReelSchedule {
         List<ReelSlotPlanner.Slot> options = ReelSlotPlanner.rank(now, occupied, history);
         if (options.isEmpty()) throw new IllegalStateException("Nessun giorno libero per un Reel nelle prossime tre settimane");
         String key = HexFormat.of().formatHex(RANDOM.generateSeed(32));
-        assets.store(key, video, headline, frameSeconds);
+        assets.store(key, video, headline, frameSeconds, template);
         boolean saved = false;
         try {
             byte[] cover = assets.preview(key);

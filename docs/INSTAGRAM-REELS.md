@@ -4,9 +4,21 @@ Allega uno o più MP4 e scrivi:
 
 > Programma questi Reel solo su Instagram. Crea un titolo e una descrizione dal contenuto di ciascun video. Scegli un fotogramma adatto alla copertina e usa lo stile Chewbecca Studio. Usa i migliori giorni e orari delle prossime tre settimane. Mostrami copertine, orari e stato.
 
-`chewbecca_schedule_instagram_reel` registra un Reel per chiamata quando l'utente chiede esplicitamente di programmarlo. ChatGPT prepara i testi e indica il secondo della copertina. Il backend crea la copertina JPEG verticale 1080 × 1920 dal fotogramma, con titolazione bianca e gialla. Su Instagram il titolo appare nella prima riga della didascalia. Il Reel compare anche nel feed Instagram. Il flusso usa esclusivamente l'API Instagram di Meta.
+`chewbecca_schedule_instagram_reel` registra un Reel per chiamata quando l'utente chiede esplicitamente di programmarlo. ChatGPT prepara i testi e indica il secondo della copertina. Quando registra la programmazione, il backend applica un modello al fotogramma e salva una copertina JPEG verticale 1080 × 1920. Su Instagram il titolo appare nella prima riga della didascalia. Il Reel compare anche nel feed Instagram. Il flusso usa esclusivamente l'API Instagram di Meta.
 
 `chewbecca_instagram_reels_status` mostra la coda e gli esiti. `SCHEDULED` indica che il backend ha registrato il lavoro, `PUBLISHED` che Meta ha confermato la pubblicazione. Una risposta incerta viene verificata tramite lo stato del container. L'esito `UNKNOWN` richiede verifica su Instagram e la stessa richiesta non ripubblica il contenuto.
+
+## Modelli di copertina
+
+I tre modelli riutilizzabili sono definiti in `ReelCoverTemplate`.
+
+| Modello | Fotogramma | Trattamento |
+| --- | --- | --- |
+| `PERSONAGGIO` | Primo piano o figura riconoscibile | Ombra calda e segno rame |
+| `LUOGO` | Nave, pianeta, edificio o ambiente | Ombra blu e segno azzurro |
+| `EVENTO` | Un momento riconoscibile della scena | Ombra ambrata e segno oro |
+
+Il fotogramma fornisce soggetto e sfondo. I tre modelli usano lo stesso titolo piccolo, una sfumatura e un segno breve. Si applicano solo in risposta a una richiesta di programmazione. La consultazione della coda non elabora i video.
 
 ## Come vengono scelti gli orari
 
