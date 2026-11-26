@@ -27,7 +27,7 @@ public class InstagramQuizService {
         if(page<1 || page>10000) throw new IllegalArgumentException("Pagina non valida");
         return db.queryForList("SELECT q.question,q.answer,q.source,q.continuity,q.quiz_day,b.status FROM ig_quiz q JOIN ig_quiz_batch b ON b.id=q.batch_id WHERE q.account_id=? ORDER BY q.quiz_day DESC,q.id LIMIT 50 OFFSET ?",account(),(page-1)*50);
     }
-    public Map<String,Object> context(){return Map.of("youtubeCalendarRule","Proteggi 17:00-24:00 di ogni giorno con video o Short; entrambe le storie visibili 24h; intervallo minimo, sposta in avanti e ricontrolla prima di approvare e pubblicare", "historyPageSize",50,"zone","Europe/Rome","morningHours",List.of(8,9,10,11),"eveningHours",List.of(18,19,20,21,22),"questionSlots",QuizSlots.choose("QUESTION",samples("QUESTION"),0).evidence(),"answerSlots",QuizSlots.choose("ANSWER",samples("ANSWER"),0).evidence(),"style","Verticale 9:16, 1080x1920, italiano, fondo cinematografico, giallo #FED000, margini alti e bassi sicuri, nessuno sticker; domanda aperta senza indizi visivi; risposta con spiegazione e fonte leggibile. Usa riferimenti grafici forniti dall'utente.");}
+    public Map<String,Object> context(){return Map.of("youtubeCalendarRule","Proteggi 17:00-24:00 di ogni giorno con video o Short; entrambe le storie visibili 24h; intervallo minimo, sposta in avanti e ricontrolla prima di approvare e pubblicare", "historyPageSize",50,"zone","Europe/Rome","morningHours",List.of(8,9,10,11),"afternoonHours",List.of(15,16,17),"questionSlots",QuizSlots.choose("QUESTION",samples("QUESTION"),0).evidence(),"answerSlots",QuizSlots.choose("ANSWER",samples("ANSWER"),0).evidence(),"weekdayEvidence",QuizSlots.weekdays(samples("QUESTION"),samples("ANSWER")),"style","Verticale 9:16, 1080x1920, italiano, fondo cinematografico, giallo #FED000, margini alti e bassi sicuri, nessuno sticker; domanda aperta senza indizi visivi; risposta con spiegazione e fonte leggibile. Usa riferimenti grafici forniti dall'utente.");}
     @Transactional
     public Batch prepare(LocalDate start,int interval,List<QuizInput> entries){
         if(entries==null||entries.isEmpty()||entries.size()>20||interval<1||interval>30||start==null) throw new IllegalArgumentException("Da 1 a 20 quiz, intervallo 1-30 giorni");
@@ -41,16 +41,16 @@ public class InstagramQuizService {
         for(int i=0;i<entries.size();i++){
             var e=entries.get(i);String q=valid(e.question,20,300),a=valid(e.answer,20,750),s=valid(e.source,8,800),c=valid(e.continuity,3,10).toUpperCase(Locale.ROOT);
             if(!Set.of("CANON","LEGENDS").contains(c))throw new IllegalArgumentException("Specificare CANON o LEGENDS");
-            var morning=QuizSlots.choose("QUESTION",qSamples,prior+i);var evening=QuizSlots.choose("ANSWER",aSamples,prior+i);
             var requestedDay=next;
-            var day=YouTubeStoryWindows.nextDay(next,last,morning.hour(),evening.hour(),now().plusMinutes(5).toInstant(),releases,reserved)
+            var plan=QuizSlots.plan(next,last,now().plusMinutes(5).toInstant(),releases,reserved,qSamples,aSamples,prior+i)
                     .orElseThrow(()->new IllegalStateException("Nessuna coppia di orari compatibile con YouTube entro 180 giorni; batch non creato"));
+            var day=plan.day(); var morning=plan.question(); var afternoon=plan.answer();
             next=day.plusDays(interval); reserved.add(day);
-            var atQ=day.atTime(morning.hour(),0).atZone(ROME).toOffsetDateTime();var atA=day.atTime(evening.hour(),0).atZone(ROME).toOffsetDateTime();
+            var atQ=day.atTime(morning.hour(),0).atZone(ROME).toOffsetDateTime();var atA=day.atTime(afternoon.hour(),0).atZone(ROME).toOffsetDateTime();
             if(!atQ.isAfter(now().plusMinutes(5)))throw new IllegalArgumentException("La prima domanda deve essere futura; scegliere un altro giorno");
             String id=uuid(),hash=hash(q);
             if(db.queryForObject("SELECT COUNT(*) FROM ig_quiz WHERE account_id=? AND (question_hash=? OR quiz_day=?)",Integer.class,account(),hash,day)>0)throw new IllegalArgumentException("Domanda già utilizzata o giorno già riservato: "+day);
-            db.update("INSERT INTO ig_quiz(id,batch_id,account_id,position_no,quiz_day,continuity,question,answer,source,question_hash,slot_evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?)",id,batch,account(),i+1,day,c,q,a,s,hash,encode(Map.of("morning",morning,"evening",evening,"requestedDay",requestedDay.toString(),"youtubeProtectedEvening", "17:00-24:00 Europe/Rome; durata storia 24h", "shiftedForCalendarOrAvailability",!day.equals(requestedDay))));
+            db.update("INSERT INTO ig_quiz(id,batch_id,account_id,position_no,quiz_day,continuity,question,answer,source,question_hash,slot_evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?)",id,batch,account(),i+1,day,c,q,a,s,hash,encode(Map.of("morning",morning,"afternoon",afternoon,"weekdayMethod",plan.dayMethod(),"weekdayEvidence",plan.dayEvidence(),"requestedDay",requestedDay.toString(),"youtubeProtectedEvening", "17:00-24:00 Europe/Rome; durata storia 24h", "shiftedForCalendarOrAvailability",!day.equals(requestedDay))));
             insertStory(id,"QUESTION",atQ);insertStory(id,"ANSWER",atA);
         }
         return status(batch);
@@ -161,7 +161,7 @@ public class InstagramQuizService {
         String state=(String)batch.getFirst().get("status"),rev=(String)batch.getFirst().get("revision");return new Batch(id,state,rev,quizzes,"DRAFT".equals(state)&&quizzes.stream().flatMap(q->q.stories.stream()).allMatch(Story::hasImage)?confirmation(id,rev):null);
     }
     private List<Story> stories(String id){return db.query("SELECT id,kind,publish_at,status,CASE WHEN image_data IS NULL THEN FALSE ELSE TRUE END AS has_image,media_id,error_code FROM ig_quiz_story WHERE quiz_id=? ORDER BY publish_at",(r,n)->new Story(r.getString("id"),r.getString("kind"),r.getObject("publish_at",OffsetDateTime.class),r.getString("status"),r.getBoolean("has_image"),r.getString("media_id"),r.getString("error_code")),id);}
-    private List<QuizSlots.Sample> samples(String kind){return db.query("SELECT published_at,reach_count FROM ig_quiz_story WHERE account_id=? AND kind=? AND status='PUBLISHED' AND reach_count IS NOT NULL AND published_at>=?",(r,n)->new QuizSlots.Sample(r.getObject("published_at",OffsetDateTime.class).atZoneSameInstant(ROME).getHour(),r.getLong("reach_count")),account(),kind,now().minusDays(120));}
+    private List<QuizSlots.Sample> samples(String kind){return db.query("SELECT published_at,reach_count FROM ig_quiz_story WHERE account_id=? AND kind=? AND status='PUBLISHED' AND reach_count IS NOT NULL AND published_at>=?",(r,n)->new QuizSlots.Sample(r.getObject("published_at",OffsetDateTime.class).atZoneSameInstant(ROME).getHour(),r.getLong("reach_count"),r.getObject("published_at",OffsetDateTime.class).atZoneSameInstant(ROME).getDayOfWeek()),account(),kind,now().minusDays(120));}
     private String encode(Object value){try{return json.writeValueAsString(value);}catch(Exception e){throw new IllegalStateException("Errore serializzazione calendario");}}
     private static String confirmation(String id,String rev){return "CONFERMO QUIZ "+id+" "+rev;}
     private static String uuid(){return UUID.randomUUID().toString();}
