@@ -5,6 +5,7 @@ import it.chewbecca.youtubeanalytics.meta.client.MetaGraphClient;
 import it.chewbecca.youtubeanalytics.meta.oauth.MetaAccessTokenService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -31,6 +32,17 @@ public class InstagramGraphClient {
     }
     public String createStory(String expected,String imageUrl) {
         return id(post("/"+safeId(expected)+"/media",token(expected,true),Map.of("media_type","STORIES","image_url",imageUrl)));
+    }
+    public String createReel(String account, String videoUrl, String coverUrl, String caption) {
+        return id(post("/" + safeId(account) + "/media", token(account, true), Map.of(
+                "media_type", "REELS", "video_url", videoUrl, "cover_url", coverUrl,
+                "caption", caption, "share_to_feed", "true")));
+    }
+    public List<JsonNode> recentMedia(String account) {
+        String accessToken = token(account, false);
+        return graph.getAll("/" + safeId(account) + "/media", accessToken, Map.of(
+                "fields", "timestamp,media_product_type,like_count,comments_count"),
+                50, "Calendario Reel Instagram");
     }
     public String containerStatus(String expected,String id) {
         return get("/"+safeId(id),token(expected,true),Map.of("fields","status_code")).path("status_code").asText("UNKNOWN");
