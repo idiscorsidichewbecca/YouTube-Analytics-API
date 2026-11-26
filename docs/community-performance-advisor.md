@@ -1,6 +1,6 @@
 # Chewbecca Studio — Community Manager e Performance Advisor
 
-L'aggiornamento aggiunge i due moduli a Java 21, Spring Boot 3.5.16 e Spring AI 1.1.8. Usa la connessione Google già configurata e lo stesso database. Flyway applica V9 e V10. Lascia abilitati i flag già presenti sul servizio. Tutte le nuove integrazioni sono opt-in.
+L'aggiornamento aggiunge i due moduli a Java 21, Spring Boot 3.5.16 e Spring AI 1.1.8. Usa la connessione Google già configurata e lo stesso database. Flyway applica V9, V10 e V11. Lascia abilitati i flag già presenti sul servizio. Tutte le nuove integrazioni sono opt-in.
 
 ## Render
 
@@ -15,6 +15,8 @@ L'aggiornamento aggiunge i due moduli a Java 21, Spring Boot 3.5.16 e Spring AI 
 | `APP_PERFORMANCE_REPORTING_CRON` | `0 20 */6 * * *` | Frequenza dell'importazione reach, in ora italiana |
 | `APP_PERFORMANCE_END_SCREEN_REPORTING_ENABLED` | `false` | Importa i CSV delle schermate finali |
 | `APP_PERFORMANCE_END_SCREEN_REPORTING_CRON` | `0 45 */6 * * *` | Frequenza dell'importazione schermate finali, in ora italiana |
+| `APP_PERFORMANCE_EXTENDED_REPORTING_ENABLED` | `false` | Importa i CSV di reach per sorgente e dispositivo e di utilizzo dei sottotitoli |
+| `APP_PERFORMANCE_EXTENDED_REPORTING_CRON` | `0 35 */6 * * *` | Frequenza di importazione dei due report estesi, in ora italiana |
 | `APP_PERFORMANCE_EVALUATIONS_ENABLED` | `false` | Raccoglie misure successive agli interventi già applicati |
 | `APP_PERFORMANCE_EVALUATIONS_CRON` | `0 10 6 * * *` | Rivalutazioni automatiche, in ora italiana |
 | `APP_PERFORMANCE_EMAIL_ENABLED` | `false` | Invia il riepilogo deterministico al destinatario configurato |
@@ -52,18 +54,45 @@ Ogni batch ha fino a 25 righe, numeri stabili, revisione e stati per riga. Il pr
 | Famiglia | Fonte e dati effettivi | Limiti |
 | --- | --- | --- |
 | Catalogo | Data API, titolo, descrizione, durata, formato classificato, URL miniatura | Il formato dei video brevi può dipendere dal classificatore e dalle eccezioni già configurate |
-| Reach | Reporting `channel_reach_basic_a1`, impressioni e CTR per video e data | Il job deve essere offerto e produrre CSV. Il CTR di periodo è ponderato sulle impressioni con CTR disponibile. Una riga mancante rimane assente |
+| Reach | Reporting `channel_reach_basic_a1`, impressioni e CTR per video, canale e data | Il job deve essere offerto e produrre CSV. Il CTR di periodo è ponderato sulle impressioni con CTR disponibile. Una riga mancante rimane assente |
 | Visualizzazioni e watch time | Analytics `views`, `estimatedMinutesWatched`, durata e percentuale media, trend giornaliero | Le query aggregate non espongono sempre l'ultimo giorno effettivo. Quello osservabile è indicato per i dati giornalieri |
 | Traffico | Analytics, incluse ricerca, suggeriti, navigazione, esterno e feed Shorts quando esposti | Termini e dettagli sono soggetti a soglie privacy. Il reach di base non ha segmentazione per sorgente |
-| Retention | Analytics, `audienceWatchRatio`, `relativeRetentionPerformance` e curva per avanzamento del video | I punti a 30 e 60 secondi sono approssimazioni sulla risoluzione della curva. I cali sono candidati da rivedere. Un rapporto sopra 1 identifica un segmento compatibile con revisioni/ripetizioni |
-| Engagement | Analytics, like, commenti, condivisioni, iscritti acquisiti e persi | Quote facoltative da leggere sulla stessa finestra: (like + commenti + condivisioni) / visualizzazioni e iscritti acquisiti / visualizzazioni. Se manca il denominatore, il rapporto è assente |
-| Schermate finali | Reporting `channel_end_screens_a2`, impressioni e click degli elementi | Visibilità del report, righe del canale e contenuto con schermate finali. Il tasso aggregato usa click / impressioni |
-| Shorts | Analytics, `engagedViews`, retention, durata e percentuale media, visualizzazioni da sorgente SHORTS | Disponibili se Google restituisce righe. Questo flusso non dispone di viewed vs swiped away. Tieni distinte visualizzazioni ed engaged views |
-| Ricavi | Analytics, `estimatedRevenue`, CPM e riproduzioni monetizzate; RPM stimato come ricavo stimato / views × 1000 | Permessi monetari e report compatibile. Le impressioni pubblicitarie sono una metrica distinta dalla reach delle miniature |
+| Retention | Analytics, `audienceWatchRatio`, `relativeRetentionPerformance` e curva per avanzamento del video | I punti a 3, 10, 30 e 60 secondi sono approssimazioni sulla risoluzione della curva. I cali sono candidati da rivedere. Un rapporto sopra 1 identifica un segmento compatibile con revisioni/ripetizioni |
+| Engagement | Analytics, like, commenti, condivisioni, iscritti acquisiti e persi | `RATIOS` espone engagement e conversione iscritti sulla stessa finestra e indica gli iscritti netti: le formule sono riportate sotto |
+| Schermate finali | Reporting `channel_end_screens_a2`, impressioni, clic e CTR complessivo e per tipo di elemento | La suddivisione storica è ricostruibile per i CSV ancora scaricabili. Il tasso aggregato usa clic / impressioni |
+| Shorts | Analytics, `engagedViews`, retention, durata e percentuale media, visualizzazioni da sorgente SHORTS e riproduzioni dalla posizione SHORTS_FEED | La fonte di traffico e la posizione di riproduzione misurano fenomeni diversi. Questo flusso non dispone di Shown in feed o Viewed vs swiped away |
+| Ricavi | Analytics, `estimatedRevenue`, CPM e riproduzioni monetizzate; RPM stimato come ricavo stimato × 1.000 / visualizzazioni per i video lunghi oppure / engaged views per gli Shorts | Permessi monetari e report compatibile. Le impressioni pubblicitarie sono una metrica distinta dalla reach delle miniature |
 
 Ogni sezione indica fonte, periodo richiesto, timestamp di raccolta e disponibilità. I CSV Reporting usano giornate PST fisse (UTC−8) e indicano data del report e tempi di generazione e importazione. Analytics normalmente elabora i dati con ritardo di 48–72 ore. Le finestre di uno e due giorni sono giorni di calendario Pacific dalla data di pubblicazione, anche se il video è uscito a metà giornata. Per 7 e 28 giorni vale lo stesso criterio. Nessuna finestra rappresenta le prime 24, 48, 168 o 672 ore esatte. [Dati Analytics](https://developers.google.com/youtube/analytics/data_model) · [Report canale](https://developers.google.com/youtube/reporting/v1/reports/channel_reports) · [Definizioni Reporting](https://developers.google.com/youtube/reporting/v1/reports/metrics)
 
 L'importazione considera tutte le pagine dei job disponibili e sostituisce atomicamente una giornata quando Google pubblica una versione più recente. Recupera lo storico ancora scaricabile. Per un nuovo job Google documenta il backfill dei 30 giorni precedenti. I CSV storici scadono dopo 30 giorni dalla generazione, quelli ordinari dopo 60. La copertura effettiva resta legata ai report disponibili. La prima settimana del video può quindi restare senza impressioni storiche. I dati vengono rinnovati dopo verifica del canale e dei video. Le bozze dei commenti e i dati operativi non rinnovati vengono rimossi entro la finestra di 28 giorni. La disconnessione locale cancella sincronicamente i dati dei due nuovi moduli per il canale. [Panoramica Reporting](https://developers.google.com/youtube/reporting/v1/reports) · [Norme per sviluppatori YouTube API](https://developers.google.com/youtube/terms/developer-policies)
+
+## Sezioni metriche avanzate
+
+Usa `chewbecca_video_metrics` per un video e `chewbecca_channel_metrics` per il canale. Raggruppa le sezioni per argomento durante gli approfondimenti. Il tool riporta il periodo richiesto, l'ultima data osservata quando presente e lo stato di disponibilità. I dati Reporting a livello canale riguardano gli upload attribuibili al canale.
+
+| Area | Sezioni aggiuntive | Dati |
+| --- | --- | --- |
+| Reach | `REACH_BY_SOURCE`, `REACH_BY_SOURCE_DETAIL`, `REACH_BY_DEVICE`, `REACH_BY_OS` | Impressioni e CTR delle miniature, segmentati dal report `channel_reach_combined_a1`. Il CTR pondera soltanto le impressioni con CTR misurato. Le etichette sono i codici originali di Google. Le liste mostrano fino a 25 segmenti per sezione e indicano l'eventuale troncamento |
+| Performance Shorts | `SHORTS_FEED`, `ENGAGED_VIEWS_DAILY` | Views, engaged views e watch time sul player Shorts, più trend complessivo delle engaged views. Il benchmark Shorts aggiunge retention a 3 e 10 secondi e durata media |
+| Retention | `RETENTION_SEGMENTS` | Conteggi ufficiali di avvii, abbandoni e riproduzioni per segmento, con posizione in secondi stimata dalla durata |
+| Audience | `COUNTRY`, `DEMOGRAPHICS`, `SUBSCRIPTION_STATUS`, `UNIQUE_VIEWERS_DAILY` | Paesi, età e genere, iscritti e non iscritti. Il report giornaliero `uniques` viene richiesto separatamente e può non essere restituito da Google. Le righe degli spettatori unici sono giornaliere e non vanno sommate |
+| Distribuzione | `DEVICE`, `OPERATING_SYSTEM`, `DEVICE_AND_OS`, `YOUTUBE_PRODUCT`, `LIVE_OR_ON_DEMAND`, `PLAYBACK_LOCATION`, `EMBEDDED_PLAYERS`, `PLAYLIST_REFERRERS`, `CHANNEL_REFERRERS` | Ripartizioni per dispositivo, sistema, prodotto, dirette e on demand, player e referrer |
+| Interazioni | `ENGAGEMENT_DETAIL`, `ENGAGEMENT_DAILY`, `SHARES_BY_SERVICE`, `RATIOS`, `CARDS`, `END_SCREENS_BY_TYPE`, `ANNOTATIONS_HISTORICAL` | Dislike, aggiunte e rimozioni da playlist, trend, servizi di condivisione, percentuali editoriali, schede, tipi di schermata finale e dati storici delle annotazioni quando presenti |
+| Contatori correnti | `LIFETIME_COUNTERS` | Snapshot cumulativo Data API di visualizzazioni, like, commenti e dislike quando autorizzati e restituiti. Si applica solo a un video e non viene usato come dato di periodo |
+| Sottotitoli | `SUBTITLES` | Views, engaged views e minuti visti per lingua dei sottotitoli e lingua della traduzione, con le componenti Premium quando fornite |
+| Live | `LIVE_CONCURRENT`, `LIVE_CONCURRENT_TIMELINE` | Media e picco degli spettatori contemporanei di una diretta, anche nel tempo quando disponibili |
+| Entrate | `PREMIUM`, `MONETARY_COMPONENTS`, `MONETARY_DAILY`, `ADS_BY_TYPE` | Views e watch time Premium, ricavi stimati da annunci e Premium, andamento giornaliero, impressioni pubblicitarie e CPM per tipo di annuncio. Le metriche economiche usano USD e richiedono il Programma partner e lo scope monetario |
+
+`RATIOS` calcola engagement come (like + commenti + condivisioni) × 100 / views, conversione iscritti come iscritti acquisiti × 100 / views e saldo come acquisiti meno persi. I valori restano assenti quando mancano gli input necessari. L'RPM è una stima sui ricavi effettivamente restituiti dall'API. [Report Analytics di canale](https://developers.google.com/youtube/analytics/channel_reports) · [RPM di YouTube](https://support.google.com/youtube/answer/9314357)
+
+I report estesi riusano OAuth, Reporting API e `APP_PERFORMANCE_REPORTING_CREATE_JOB`. `chewbecca_reporting_status` restituisce lo stato di ogni nuovo job in `extendedReports`. La raccolta aggiorna il giorno quando YouTube rilascia un CSV più recente e applica le regole di verifica e cancellazione dei report esistenti. [Report Reporting di canale](https://developers.google.com/youtube/reporting/v1/reports/channel_reports) · [Codici delle dimensioni Reporting](https://developers.google.com/youtube/reporting/v1/reports/dimensions)
+
+Dati come Shown in feed, Viewed vs swiped away e spettatori di ritorno restano visibili in Studio attraverso i relativi report di YouTube. Il plugin espone le riproduzioni del feed e le engaged views disponibili nelle API pubbliche e le presenta con la loro definizione. [Guida YouTube Analytics per Shorts](https://support.google.com/youtube/answer/12942217) · [Posizioni di riproduzione e modifica delle views](https://developers.google.com/youtube/analytics/revision_history)
+
+> Per questo Short mostrami engaged views, riproduzioni nel player Shorts, retention nei primi 3 e 10 secondi, segmenti con più abbandoni, sorgenti di traffico e RPM stimato se autorizzato. Distingui i dati mancanti e indicami l'ultima data osservata.
+
+> Negli ultimi 28 giorni, quali sorgenti e dispositivi hanno generato più impressioni delle miniature? Incrocia il CTR segmentato con i dati di traffico e con la retention dei video che si discostano dal benchmark.
 
 ## Benchmark, interventi e rivalutazioni
 

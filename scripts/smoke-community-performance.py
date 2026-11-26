@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory() as tmp:
             else:
                 raise SystemExit(logpath.read_text()[-3500:])
             tools = {tool['name']: tool for tool in rpc('tools/list')['result']['tools']}
-            assert len(tools) == 41, list(tools)
+            assert len(tools) == 42, list(tools)
             files = Path('src/main/java/it/chewbecca/youtubeanalytics/mcp')
             legacy_names = set()
             for name in ['ChewbeccaMcpTools', 'ChewbeccaMcpPublishingTools', 'ChewbeccaMcpWeeklyTools',
@@ -76,6 +76,10 @@ with tempfile.TemporaryDirectory() as tmp:
                 legacy_names.update(re.findall(r'"(chewbecca_[a-z_]+)"', (files / (name + '.java')).read_text()))
             assert len(legacy_names) == 21, legacy_names
             assert legacy_names.issubset(tools), legacy_names.difference(tools)
+            video_sections = tools['chewbecca_video_metrics']['inputSchema']['properties']['sections']['items']['enum']
+            channel_sections = tools['chewbecca_channel_metrics']['inputSchema']['properties']['sections']['items']['enum']
+            assert {'RETENTION_SEGMENTS', 'SHORTS_FEED', 'REACH_BY_DEVICE', 'END_SCREENS_BY_TYPE'} <= set(video_sections)
+            assert 'RETENTION_SEGMENTS' not in channel_sections and 'REACH_BY_SOURCE' in channel_sections
             assert tools['chewbecca_prepare_video_optimization']['_meta']['openai/fileParams'] == ['option_a', 'option_b', 'option_c']
             for name in ['chewbecca_publish_comment_replies', 'chewbecca_apply_video_optimization']:
                 spec = tools[name]
@@ -84,8 +88,8 @@ with tempfile.TemporaryDirectory() as tmp:
                 assert response['result']['isError'], response
                 assert 'mcp/www_authenticate' in response['result']['_meta'], response
             log = logpath.read_text().lower()
-            assert 'community manager' in log and 'performance advisor' in log, log[-5000:]
-            print('Health UP, Flyway V9/V10, 21 strumenti invariati, 20 nuovi strumenti e scope di scrittura verificati.')
+            assert all(name in log for name in ['community manager', 'performance advisor', 'advisor extended metrics']), log[-5000:]
+            print('Health UP, Flyway V9–V11, 42 strumenti MCP e sezioni metriche e scope di scrittura verificati.')
         finally:
             process.terminate()
             try:

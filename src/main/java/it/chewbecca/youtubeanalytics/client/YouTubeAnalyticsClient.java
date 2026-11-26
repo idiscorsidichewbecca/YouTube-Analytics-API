@@ -44,6 +44,7 @@ public class YouTubeAnalyticsClient {
             "subscribersLost"
     );
     private static final String ENGAGED_VIEWS_METRIC = "engagedViews";
+    private static final String DISTRIBUTION = "engagedViews,views,estimatedMinutesWatched";
     // Il totale stimato è la metrica monetaria indispensabile. Le componenti vengono
     // richieste separatamente: un'eventuale incompatibilità di una metrica secondaria
     // non deve impedire di acquisire il ricavo totale del video.
@@ -490,19 +491,15 @@ public class YouTubeAnalyticsClient {
      * or an unsupported report stays distinct from a reported numeric zero.
      */
     public List<Map<String, Object>> advisorRows(String videoId, LocalDate from, LocalDate to, String report) {
-        if (!videoId.matches("[A-Za-z0-9_-]{11}")) throw new IllegalArgumentException("ID video non valido");
-        String filter = "video==" + videoId;
-        var request = switch (report) {
-            case "CORE" -> new AnalyticsQuery(from, to, CORE_VIEW_METRICS, null, filter, null, null, null);
-            case "ENGAGEMENT" -> new AnalyticsQuery(from, to, ENGAGEMENT_METRICS, null, filter, null, null, null);
-            case "ENGAGED_VIEWS" -> new AnalyticsQuery(from, to, ENGAGED_VIEWS_METRIC, null, filter, null, null, null);
-            case "DAILY" -> new AnalyticsQuery(from, to, CORE_VIEW_METRICS, "day", filter, "day", null, null);
-            case "MONETARY" -> new AnalyticsQuery(from, to, TOTAL_REVENUE_METRICS, null, filter, null, null, null);
-            case "ADS" -> new AnalyticsQuery(from, to, AD_PERFORMANCE_METRICS, null, filter, null, null, null);
-            case "RETENTION" -> new AnalyticsQuery(from, to, "audienceWatchRatio,relativeRetentionPerformance",
-                    "elapsedVideoTimeRatio", filter, "elapsedVideoTimeRatio", null, null);
-            default -> throw new IllegalArgumentException("Report performance sconosciuto");
-        };
+        if (videoId != null && !videoId.matches("[A-Za-z0-9_-]{11}")) {
+            throw new IllegalArgumentException("ID video non valido");
+        }
+        var spec = AdvisorReport.valueOf(report);
+        if (videoId == null && !spec.channelSupported()) throw new IllegalArgumentException("Serve un ID video");
+        String filter = videoId == null ? spec.extraFilter : "video==" + videoId;
+        if (videoId != null && spec.extraFilter != null) filter += ";" + spec.extraFilter;
+        var request = new AnalyticsQuery(from, to, spec.metrics, spec.dimensions, filter, spec.sort,
+                spec.limit, null);
         return query(request).rows().stream().map(row -> {
             Map<String, Object> result = new LinkedHashMap<>();
             row.values().forEach((key, value) -> {
@@ -511,6 +508,75 @@ public class YouTubeAnalyticsClient {
             });
             return result;
         }).toList();
+    }
+
+    public enum AdvisorReport {
+        CORE(CORE_VIEW_METRICS),
+        ENGAGEMENT(ENGAGEMENT_METRICS),
+        ENGAGEMENT_DETAIL("dislikes,videosAddedToPlaylists,videosRemovedFromPlaylists"),
+        ENGAGED_VIEWS(ENGAGED_VIEWS_METRIC),
+        DAILY(CORE_VIEW_METRICS, "day", "day"),
+        ENGAGEMENT_DAILY(ENGAGEMENT_METRICS + ",dislikes,videosAddedToPlaylists,videosRemovedFromPlaylists", "day", "day"),
+        ENGAGED_VIEWS_DAILY(ENGAGED_VIEWS_METRIC, "day", "day"),
+        PREMIUM("redViews,estimatedRedMinutesWatched"),
+        UNIQUE_VIEWERS_DAILY("uniques", "day", "day"),
+        TRAFFIC(DISTRIBUTION, "insightTrafficSourceType", "-views"),
+        SEARCH_TERMS(DISTRIBUTION, "insightTrafficSourceDetail", "-views", "insightTrafficSourceType==YT_SEARCH", 25),
+        SUGGESTED_VIDEOS(DISTRIBUTION, "insightTrafficSourceDetail", "-views", "insightTrafficSourceType==RELATED_VIDEO", 25),
+        EXTERNAL_DETAILS(DISTRIBUTION, "insightTrafficSourceDetail", "-views", "insightTrafficSourceType==EXT_URL", 25),
+        PLAYLIST_REFERRERS(DISTRIBUTION, "insightTrafficSourceDetail", "-views", "insightTrafficSourceType==PLAYLIST", 25),
+        CHANNEL_REFERRERS(DISTRIBUTION, "insightTrafficSourceDetail", "-views", "insightTrafficSourceType==YT_CHANNEL", 25),
+        PLAYBACK_LOCATION(DISTRIBUTION, "insightPlaybackLocationType", "-views"),
+        EMBEDDED_PLAYERS(DISTRIBUTION, "insightPlaybackLocationDetail", "-views", "insightPlaybackLocationType==EMBEDDED", 25),
+        COUNTRY(DISTRIBUTION + ",averageViewDuration,averageViewPercentage", "country", "-views"),
+        DEMOGRAPHICS("viewerPercentage", "ageGroup,gender", "ageGroup,gender"),
+        SUBSCRIPTION_STATUS(DISTRIBUTION + ",averageViewDuration,averageViewPercentage", "subscribedStatus", "-views"),
+        DEVICE(DISTRIBUTION, "deviceType", "-views"),
+        OPERATING_SYSTEM(DISTRIBUTION, "operatingSystem", "-views"),
+        DEVICE_AND_OS(DISTRIBUTION, "deviceType,operatingSystem", "-views"),
+        YOUTUBE_PRODUCT(DISTRIBUTION + ",averageViewDuration,averageViewPercentage", "youtubeProduct", "-views"),
+        LIVE_OR_ON_DEMAND(DISTRIBUTION + ",averageViewDuration", "liveOrOnDemand", "-views"),
+        SHARES_BY_SERVICE("shares", "sharingService", "-shares"),
+        ANNOTATIONS_HISTORICAL("annotationClickThroughRate,annotationCloseRate,annotationImpressions,"
+                + "annotationClickableImpressions,annotationClosableImpressions,annotationClicks,annotationCloses"),
+        CARDS("cardImpressions,cardClicks,cardClickRate,cardTeaserImpressions,cardTeaserClicks,cardTeaserClickRate"),
+        LIVE_CONCURRENT("averageConcurrentViewers,peakConcurrentViewers"),
+        LIVE_CONCURRENT_TIMELINE("averageConcurrentViewers,peakConcurrentViewers", "livestreamPosition", "livestreamPosition"),
+        MONETARY(TOTAL_REVENUE_METRICS + ",engagedViews"),
+        MONETARY_COMPONENTS(REVENUE_COMPONENT_METRICS),
+        MONETARY_DAILY(TOTAL_REVENUE_METRICS + ",engagedViews", "day", "day"),
+        ADS(AD_PERFORMANCE_METRICS),
+        ADS_BY_TYPE("grossRevenue,adImpressions,cpm", "adType", "-adImpressions"),
+        RETENTION("audienceWatchRatio,relativeRetentionPerformance", "elapsedVideoTimeRatio", "elapsedVideoTimeRatio"),
+        RETENTION_SEGMENTS("startedWatching,stoppedWatching,totalSegmentImpressions",
+                "elapsedVideoTimeRatio", "elapsedVideoTimeRatio");
+
+        private final String metrics;
+        private final String dimensions;
+        private final String sort;
+        private final String extraFilter;
+        private final Integer limit;
+
+        public boolean channelSupported() {
+            return this != RETENTION && this != RETENTION_SEGMENTS
+                    && this != LIVE_CONCURRENT && this != LIVE_CONCURRENT_TIMELINE;
+        }
+
+        AdvisorReport(String metrics) {
+            this(metrics, null, null);
+        }
+
+        AdvisorReport(String metrics, String dimensions, String sort) {
+            this(metrics, dimensions, sort, null, null);
+        }
+
+        AdvisorReport(String metrics, String dimensions, String sort, String extraFilter, Integer limit) {
+            this.metrics = metrics;
+            this.dimensions = dimensions;
+            this.sort = sort;
+            this.extraFilter = extraFilter;
+            this.limit = limit;
+        }
     }
 
     public Map<String, Long> advisorViewTotals(List<String> videoIds, LocalDate from, LocalDate to) {

@@ -35,6 +35,7 @@ public class StudioDataRetention {
         comments.expire(before);
         reach.expire(before);
         jdbc.update("delete from advisor_end_screen_day where verified_at < ?", ReachRepository.utc(before));
+        jdbc.update("delete from advisor_extended_day where verified_at < ?", ReachRepository.utc(before));
         optimizations.purgeExpiredData(before);
     }
 
@@ -43,6 +44,7 @@ public class StudioDataRetention {
         jdbc.update("delete from community_reply_batch where channel_id=?", event.channelId());
         jdbc.update("delete from advisor_end_screen_day where channel_id=?", event.channelId());
         jdbc.update("delete from advisor_reach_day where channel_id=?", event.channelId());
+        jdbc.update("delete from advisor_extended_day where channel_id=?", event.channelId());
         jdbc.update("delete from advisor_optimization where channel_id=?", event.channelId());
     }
 }

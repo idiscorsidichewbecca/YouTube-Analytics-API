@@ -1,8 +1,11 @@
 package it.chewbecca.youtubeanalytics.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import it.chewbecca.youtubeanalytics.chatgpt.OpenAiFileDownloadService;
+import it.chewbecca.youtubeanalytics.performance.AdvisorMetrics;
+import it.chewbecca.youtubeanalytics.performance.ExtendedReportingCollector;
 import it.chewbecca.youtubeanalytics.performance.PerformanceAdvisor;
 import it.chewbecca.youtubeanalytics.performance.ReachCollector;
 import it.chewbecca.youtubeanalytics.performance.StudioWeeklyReport;
@@ -24,22 +27,30 @@ import static it.chewbecca.youtubeanalytics.mcp.ChewbeccaStudioMcpSupport.Mode.*
 public class ChewbeccaPerformanceMcpTools {
     @Bean
     List<SyncToolSpecification> chewbeccaPerformanceTools(PerformanceAdvisor advisor, VideoOptimizationService edits,
-                                                           ReachCollector reporting, StudioWeeklyReport report,
+                                                           ReachCollector reporting, ExtendedReportingCollector extendedReporting,
+                                                           StudioWeeklyReport report,
                                                            OpenAiFileDownloadService files, ObjectMapper json,
                                                            @Value("${app.mcp.public-url}") String url) {
         var tool = new ChewbeccaStudioMcpSupport(json, url);
         Map<String, Object> video = Map.of("video_id", text());
         Map<String, Object> age = Map.of("video_id", text(), "age_days", integer());
-        var allowedSections = strings("CORE", "ENGAGEMENT", "DAILY", "REACH", "TRAFFIC", "SEARCH_TERMS",
-                "SUGGESTED_VIDEOS", "EXTERNAL_DETAILS", "RETENTION", "ENGAGED_VIEWS", "END_SCREENS", "MONETARY", "ADS");
+        var allowedSections = strings(AdvisorMetrics.sections(false).toArray(String[]::new));
+        var channelSections = strings(AdvisorMetrics.sections(true).toArray(String[]::new));
         return List.of(
                 tool.tool("chewbecca_video_metrics", DATA + """
                         Dati ufficiali YouTube per video. Usa sections per reach, retention, traffico, ricerca,
-                        engagement, Shorts, schermate finali o ricavi. Leggi disponibilità, finestra e aggiornamento.
-                        Mostra assenze e dati parziali. Non confondere CTR miniature con impressioni pubblicitarie.
+                        engagement, Shorts, schermate finali o ricavi. Per un'analisi estesa usa pochi gruppi
+                        di sezioni per richiesta. Leggi disponibilità, finestra e aggiornamento. Mostra dati assenti
+                        o parziali. Distingui CTR delle miniature, visualizzazioni nel feed e impressioni pubblicitarie.
                         """, Map.of("video_id", text(), "from", text(), "to", text(), "sections", array(allowedSections)),
                         List.of("video_id"), READ, args -> out(advisor.metrics(required(args, "video_id"),
                                 date(args, "from"), date(args, "to"), strings(args, "sections")))),
+                tool.tool("chewbecca_channel_metrics", DATA + """
+                        Metriche aggregate del canale collegato. Seleziona sezioni come DEMOGRAPHICS, COUNTRY,
+                        SUBSCRIPTION_STATUS, SHORTS_FEED, REACH_BY_SOURCE o MONETARY. Verifica il periodo osservato
+                        e la copertura. I dati aggregati Reporting coprono gli upload attribuibili al canale.
+                        """, Map.of("from", text(), "to", text(), "sections", array(channelSections)), List.of(), READ,
+                        args -> out(advisor.channelMetrics(date(args, "from"), date(args, "to"), strings(args, "sections")))),
                 tool.tool("chewbecca_video_benchmark", DATA + """
                         Confronta con contenuti del canale alla stessa età. age_days: 1, 2, 7 o 28 giorni di calendario.
                         Mostra mediane, percentili, numero di comparabili, finestra e confidenza per i dati disponibili.
@@ -105,8 +116,13 @@ public class ChewbeccaPerformanceMcpTools {
                         ChatGPT e chiedi approvazione per ogni scrittura esterna.
                         """, Map.of("comment_pages", integer()), List.of(), DRAFT,
                         args -> out(report.report(num(args, "comment_pages", 3)))),
-                tool.tool("chewbecca_reporting_status", "Stato del reporting job reach e ultimo tentativo locale.",
-                        Map.of(), List.of(), READ, args -> out(reporting.status(advisor.channel())))
+                tool.tool("chewbecca_reporting_status", "Stato dei reporting job reach e dei report estesi.",
+                        Map.of(), List.of(), READ, args -> {
+                            String channel = advisor.channel();
+                            ObjectNode status = json.valueToTree(reporting.status(channel));
+                            status.set("extendedReports", json.valueToTree(extendedReporting.status(channel)));
+                            return out(status);
+                        })
         );
     }
 }

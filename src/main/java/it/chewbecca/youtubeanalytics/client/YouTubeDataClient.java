@@ -107,6 +107,22 @@ public class YouTubeDataClient {
         return getVideo(videoId, true);
     }
 
+    public Map<String, Long> getOwnedVideoCounters(String videoId, String channelId) {
+        URI uri = UriComponentsBuilder.fromUriString(BASE_URL + "/videos")
+                .queryParam("part", "snippet,statistics").queryParam("id", videoId).build().encode().toUri();
+        var item = firstItem(get(uri, accessTokenService.getValidAccessToken(), "videos.list statistics"));
+        if (item == null || !channelId.equals(item.path("snippet").path("channelId").asText())) {
+            throw new IllegalArgumentException("Video non disponibile per il canale collegato");
+        }
+        var statistics = item.path("statistics");
+        Map<String, Long> counters = new LinkedHashMap<>();
+        for (String key : List.of("viewCount", "likeCount", "commentCount", "dislikeCount")) {
+            var value = statistics.path(key);
+            if (value.asText().matches("[0-9]+")) counters.put(key, Long.parseLong(value.asText()));
+        }
+        return counters;
+    }
+
     private VideoMetadata getVideo(String videoId, boolean includeFileDetails) {
         String accessToken = accessTokenService.getValidAccessToken();
         List<VideoMetadata> videos = loadVideos(List.of(videoId), accessToken, includeFileDetails);

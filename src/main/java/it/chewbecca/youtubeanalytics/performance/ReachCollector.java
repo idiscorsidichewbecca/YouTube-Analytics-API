@@ -13,9 +13,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Comparator;
 import java.util.Objects;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -68,20 +66,12 @@ public class ReachCollector {
                 last = new Status("WAITING_FOR_REPORTS", channel, now, job, null, 0);
                 return;
             }
-            var newest = new TreeMap<LocalDate, YouTubeReportingClient.Report>();
-            var byCreation = Comparator.comparing(YouTubeReportingClient.Report::created)
-                    .thenComparing(YouTubeReportingClient.Report::id);
-            for (var job : jobs) {
-                for (var report : reporting.reports(job)) {
-                    newest.merge(report.day(), report,
-                            (first, second) -> byCreation.compare(first, second) >= 0 ? first : second);
-                }
-            }
+            var newest = reporting.latestReports(jobs);
             String owner = channel;
             var existing = data.getAllUploadedVideos(credential.getUploadsPlaylistId()).stream()
                     .filter(video -> video.available() && owner.equals(video.channelId()))
                     .map(YouTubeDataClient.VideoMetadata::videoId).collect(Collectors.toSet());
-            for (var report : newest.values()) {
+            for (var report : newest) {
                 if (reach.isCurrent(channel, report.day(), report.created(), report.id())) continue;
                 var rows = reporting.download(channel, report).stream()
                         .filter(row -> existing.contains(row.videoId())).toList();
@@ -94,7 +84,7 @@ public class ReachCollector {
             reach.removeMissingVideos(channel, existing);
             reach.verified(channel, now);
             last = new Status(newest.isEmpty() ? "WAITING_FOR_REPORTS" : "OK", channel,
-                    now, String.join(",", jobs), newest.isEmpty() ? null : newest.lastKey(), imported);
+                    now, String.join(",", jobs), newest.isEmpty() ? null : newest.getLast().day(), imported);
             metrics.counter("chewbecca.performance.reporting.imported").increment(imported);
             log.info("reach_import result={} days_imported={}", last.state(), imported);
         } catch (YoutubeNotConnectedException error) {

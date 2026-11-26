@@ -51,6 +51,8 @@ app:
     reporting-cron: "${APP_PERFORMANCE_REPORTING_CRON:0 20 */6 * * *}"
     end-screen-reporting-enabled: ${APP_PERFORMANCE_END_SCREEN_REPORTING_ENABLED:false}
     end-screen-reporting-cron: "${APP_PERFORMANCE_END_SCREEN_REPORTING_CRON:0 45 */6 * * *}"
+    extended-reporting-enabled: ${APP_PERFORMANCE_EXTENDED_REPORTING_ENABLED:false}
+    extended-reporting-cron: "${APP_PERFORMANCE_EXTENDED_REPORTING_CRON:0 35 */6 * * *}"
     evaluations-enabled: ${APP_PERFORMANCE_EVALUATIONS_ENABLED:false}
     evaluations-cron: "${APP_PERFORMANCE_EVALUATIONS_CRON:0 10 6 * * *}"
     email-enabled: ${APP_PERFORMANCE_EMAIL_ENABLED:false}

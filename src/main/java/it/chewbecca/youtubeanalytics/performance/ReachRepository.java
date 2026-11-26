@@ -42,20 +42,30 @@ public class ReachRepository {
     }
 
     public Reach reach(String channel, String video, LocalDate from, LocalDate to) {
+        String videoFilter = video == null ? "" : " and r.video_id=?";
+        Object[] arguments = video == null ? new Object[]{channel, from, to} : new Object[]{video, channel, from, to};
         var points = jdbc.query("""
-                select d.report_day,r.impressions,r.ctr,d.report_created,d.imported_at
+                select d.report_day, sum(r.impressions) as impressions,
+                       sum(case when r.ctr is not null then r.impressions else 0 end) as measured,
+                       sum(r.ctr * r.impressions) as weighted, d.report_created, d.imported_at
                 from advisor_reach_day d left join advisor_video_reach r
-                on d.channel_id=r.channel_id and d.report_day=r.report_day and r.video_id=?
-                where d.channel_id=? and d.report_day between ? and ? order by d.report_day
-                """, (rs, n) -> new Day(rs.getObject(1, LocalDate.class), rs.getObject(2, Long.class),
-                rs.getObject(3, Double.class), rs.getObject(4, OffsetDateTime.class),
-                rs.getObject(5, OffsetDateTime.class)), video, channel, from, to);
+                on d.channel_id=r.channel_id and d.report_day=r.report_day %s
+                where d.channel_id=? and d.report_day between ? and ?
+                group by d.report_day, d.report_created, d.imported_at order by d.report_day
+                """.formatted(videoFilter), (rs, n) -> {
+            long impressions = rs.getLong("impressions");
+            Long impressionsOrNull = rs.wasNull() ? null : impressions;
+            long measured = rs.getLong("measured");
+            return new Day(rs.getObject(1, LocalDate.class), impressionsOrNull,
+                    measured > 0 ? rs.getDouble("weighted") / measured : null,
+                    rs.getObject("report_created", OffsetDateTime.class), rs.getObject("imported_at", OffsetDateTime.class),
+                    measured);
+        }, arguments);
         long validDays = points.stream().filter(day -> day.impressions() != null).count();
         long impressions = points.stream().filter(day -> day.impressions() != null).mapToLong(Day::impressions).sum();
-        var ctrDays = points.stream().filter(day -> day.ctr() != null && day.impressions() != null).toList();
-        long ctrImpressions = ctrDays.stream().mapToLong(Day::impressions).sum();
-        Double ctr = ctrImpressions > 0
-                ? ctrDays.stream().mapToDouble(day -> day.ctr() * day.impressions()).sum() / ctrImpressions : null;
+        long ctrImpressions = points.stream().mapToLong(Day::impressionsWithCtr).sum();
+        Double ctr = ctrImpressions > 0 ? points.stream().filter(day -> day.ctr() != null)
+                .mapToDouble(day -> day.ctr() * day.impressionsWithCtr()).sum() / ctrImpressions : null;
         long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         String availability = validDays == 0 ? "UNAVAILABLE" : validDays == days ? "AVAILABLE" : "PARTIAL";
         String ctrAvailability = ctr == null ? "UNAVAILABLE"
@@ -85,7 +95,7 @@ public class ReachRepository {
     static OffsetDateTime utc(Instant instant) { return instant.atOffset(ZoneOffset.UTC); }
 
     public record Day(LocalDate date, Long impressions, Double ctr, OffsetDateTime upstreamCreatedAt,
-                      OffsetDateTime importedAt) {}
+                      OffsetDateTime importedAt, long impressionsWithCtr) {}
     public record Reach(LocalDate from, LocalDate to, String source, String availability, String ctrAvailability,
                         Long impressions, Double ctr, long impressionsWithCtr, int reportDays, long videoDays,
                         long requestedDays, List<Day> daily) {}

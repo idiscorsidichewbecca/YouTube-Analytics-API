@@ -11,9 +11,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
-import java.time.LocalDate;
-import java.util.Comparator;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Component
@@ -57,14 +54,8 @@ public class EndScreenCollector {
             var current = videos.getAllUploadedVideos(credential.getUploadsPlaylistId()).stream()
                     .filter(video -> video.available() && owner.equals(video.channelId()))
                     .map(YouTubeDataClient.VideoMetadata::videoId).collect(Collectors.toSet());
-            var newest = new TreeMap<LocalDate, YouTubeReportingClient.Report>();
-            var order = Comparator.comparing(YouTubeReportingClient.Report::created)
-                    .thenComparing(YouTubeReportingClient.Report::id);
-            for (var job : jobs) {
-                for (var report : api.reports(job)) newest.merge(report.day(), report,
-                        (first, second) -> order.compare(first, second) >= 0 ? first : second);
-            }
-            for (var report : newest.values()) {
+            var newest = api.latestReports(jobs);
+            for (var report : newest) {
                 if (store.isCurrent(owner, report)) continue;
                 var rows = api.downloadEndScreens(owner, report).stream()
                         .filter(row -> current.contains(row.videoId())).toList();

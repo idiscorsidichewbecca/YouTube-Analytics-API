@@ -20,9 +20,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import static it.chewbecca.youtubeanalytics.client.YouTubeStudioClient.REPORTING;
 
@@ -78,6 +80,26 @@ public class YouTubeReportingClient {
 
     public List<EndScreenReportingRepository.VideoDay> downloadEndScreens(String channel, Report report) {
         return download(report, reader -> EndScreenReportingRepository.parse(reader, channel, report.day()));
+    }
+
+    List<ExtendedReportingCsv.ReachRow> downloadSegmentedReach(String channel, Report report) {
+        return download(report, reader -> ExtendedReportingCsv.reach(reader, channel, report.day()));
+    }
+
+    List<ExtendedReportingCsv.SubtitleRow> downloadSubtitles(String channel, Report report) {
+        return download(report, reader -> ExtendedReportingCsv.subtitles(reader, channel, report.day()));
+    }
+
+    List<Report> latestReports(List<String> jobs) {
+        var newest = new TreeMap<LocalDate, Report>();
+        var order = Comparator.comparing(Report::created).thenComparing(Report::id);
+        for (var job : jobs) {
+            for (var report : reports(job)) {
+                newest.merge(report.day(), report, (previous, current) ->
+                        order.compare(previous, current) >= 0 ? previous : current);
+            }
+        }
+        return List.copyOf(newest.values());
     }
 
     private <T> T download(Report report, CsvDecoder<T> decoder) {

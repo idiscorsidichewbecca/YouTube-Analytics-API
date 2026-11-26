@@ -14,10 +14,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 
 @JdbcTest
-@Import({ReachRepository.class, CommunityReplyRepository.class, VideoOptimizationRepository.class, EndScreenReportingRepository.class})
+@Import({ReachRepository.class, CommunityReplyRepository.class, VideoOptimizationRepository.class, EndScreenReportingRepository.class, ExtendedReportingRepository.class})
 class StudioPersistenceTest {
     @Autowired ReachRepository reach;
     @Autowired EndScreenReportingRepository screens;
+    @Autowired ExtendedReportingRepository extended;
     @Autowired CommunityReplyRepository replies;
     @Autowired VideoOptimizationRepository edits;
     private final Instant now = Instant.parse("2026-11-25T10:00:00Z");
@@ -79,6 +80,66 @@ class StudioPersistenceTest {
         assertThat(totals.endScreenElementClickRate()).isEqualTo(.1);
         assertThat(totals.availability()).isEqualTo("AVAILABLE");
         assertThat(totals.daily().getFirst().upstreamCreatedAt().toInstant()).isEqualTo(now);
+        assertThat(screens.totals("owner", null, day, day).endScreenElementClicks()).isEqualTo(30);
+        assertThat(screens.byType("owner", "ABCDEFGHIJK", day, day).elements())
+                .extracting(EndScreenReportingRepository.Element::clickRate).containsExactly(.125, .05);
+    }
+
+    @Test
+    void weightsSegmentedCtrOnlyOverMeasuredImpressionsAndReplacesCorrectedDays() throws Exception {
+        var rows = ExtendedReportingCsv.reach(new StringReader("""
+                date,channel_id,video_id,traffic_source_type,traffic_source_detail,device_type,operating_system,video_thumbnail_impressions,video_thumbnail_impressions_ctr
+                20261122,owner,ABCDEFGHIJK,5,"Abc, def",100,200,300,0.10
+                20261122,owner,ABCDEFGHIJK,5,"Abc, def",101,201,100,0.50
+                20261122,owner,ABCDEFGHIJK,5,NULL,101,201,100,
+                20261122,owner,aBcDEfghIJK,5,elsewhere,100,200,100,0.1
+                """), "owner", day);
+        var report = new YouTubeReportingClient.Report("initial", day, now, "unused");
+        extended.replaceReach("owner", report, now, rows);
+        var result = extended.reach("owner", "ABCDEFGHIJK", day, day.plusDays(1),
+                ExtendedReportingRepository.ReachGroup.SOURCE);
+        assertThat(result.availability()).isEqualTo("PARTIAL");
+        assertThat(result.segments()).containsExactly(new ExtendedReportingRepository.ReachSegment("5", null, 500, 400, .2));
+        var detail = extended.reach("owner", "ABCDEFGHIJK", day, day, ExtendedReportingRepository.ReachGroup.SOURCE_DETAIL);
+        assertThat(detail.segments()).extracting(ExtendedReportingRepository.ReachSegment::label)
+                .containsExactly("Abc, def", null);
+        assertThat(extended.reach("owner", null, day, day, ExtendedReportingRepository.ReachGroup.DEVICE)
+                .segments()).hasSize(2);
+
+        extended.replaceReach("owner", new YouTubeReportingClient.Report("corrected", day, now.plusSeconds(1), "unused"),
+                now, List.of());
+        extended.replaceReach("owner", report, now, rows);
+        assertThat(extended.reach("owner", "ABCDEFGHIJK", day, day, ExtendedReportingRepository.ReachGroup.SOURCE)
+                .availability()).isEqualTo("NO_ROWS");
+    }
+
+    @Test
+    void distinguishesMissingSubtitleMetricFromMeasuredZeroAndRemovesDeletedVideos() throws Exception {
+        var rows = ExtendedReportingCsv.subtitles(new StringReader("""
+                date,channel_id,video_id,subtitle_language,subtitle_language_autotranslated,engaged_views,views,watch_time_minutes,red_views,red_watch_time_minutes
+                20261122,owner,ABCDEFGHIJK,it,,0,120,30.5,,0
+                20261122,owner,ABCDEFGHIJK,it,en,15,20,5,0,0
+                """), "owner", day);
+        var report = new YouTubeReportingClient.Report("subs", day, now, "unused");
+        extended.replaceSubtitles("owner", report, now, rows);
+        var result = extended.subtitles("owner", "ABCDEFGHIJK", day, day);
+        assertThat(result.segments()).containsExactly(
+                new ExtendedReportingRepository.SubtitleSegment("it", null, 0L, 120L, 30.5, null, 0.0),
+                new ExtendedReportingRepository.SubtitleSegment("it", "en", 15L, 20L, 5.0, 0L, 0.0));
+        extended.verify("owner", ExtendedReportingRepository.SUBTITLES, java.util.Set.of(), now);
+        assertThat(extended.subtitles("owner", "ABCDEFGHIJK", day, day).availability()).isEqualTo("NO_ROWS");
+    }
+
+    @Test
+    void channelReachKeepsMissingCtrOutOfTheDenominator() {
+        reach.replace("owner", day, now, "reach", now, List.of(
+                new ReachCsv.VideoDay("ABCDEFGHIJK", 100, .25),
+                new ReachCsv.VideoDay("aBcDEfghIJK", 20, null)));
+        var totals = reach.reach("owner", null, day, day);
+        assertThat(totals.impressions()).isEqualTo(120);
+        assertThat(totals.impressionsWithCtr()).isEqualTo(100);
+        assertThat(totals.ctr()).isEqualTo(.25);
+        assertThat(totals.ctrAvailability()).isEqualTo("PARTIAL");
     }
 
     private VideoOptimizationRepository.Draft draft(String id, String kind) {

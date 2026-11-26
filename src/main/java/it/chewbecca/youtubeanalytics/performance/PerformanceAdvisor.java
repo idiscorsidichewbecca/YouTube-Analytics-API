@@ -1,7 +1,6 @@
 package it.chewbecca.youtubeanalytics.performance;
 
 import it.chewbecca.youtubeanalytics.api.model.ContentType;
-import it.chewbecca.youtubeanalytics.client.GoogleApiException;
 import it.chewbecca.youtubeanalytics.client.YouTubeAnalyticsClient;
 import it.chewbecca.youtubeanalytics.client.YouTubeDataClient;
 import it.chewbecca.youtubeanalytics.oauth.GoogleAccessTokenService;
@@ -30,87 +29,34 @@ public class PerformanceAdvisor {
     private final GoogleAccessTokenService tokens;
     private final ShortsClassifier formats;
     private final ReachRepository reach;
-    private final EndScreenReportingRepository endScreens;
+    private final AdvisorMetrics advisorMetrics;
     private final Clock clock;
 
     public PerformanceAdvisor(YouTubeAnalyticsClient analytics, YouTubeDataClient data, YoutubeCatalogService catalog,
                               GoogleAccessTokenService tokens, ShortsClassifier formats, ReachRepository reach,
-                              EndScreenReportingRepository endScreens, Clock clock) {
+                              AdvisorMetrics advisorMetrics, Clock clock) {
         this.analytics = analytics;
         this.data = data;
         this.catalog = catalog;
         this.tokens = tokens;
         this.formats = formats;
         this.reach = reach;
-        this.endScreens = endScreens;
+        this.advisorMetrics = advisorMetrics;
         this.clock = clock;
     }
 
     public Detail metrics(String id, LocalDate from, LocalDate to, List<String> sections) {
         var video = owned(id);
         var range = window(video, from, to);
-        return metrics(video, range, sections);
+        return new Detail(view(video), range, advisorMetrics.read(channel(), video, format(video), range, sections),
+                AdvisorMetrics.NOTES);
     }
 
-    private Detail metrics(VideoMetadata video, Window range, List<String> sections) {
-        String id = video.videoId();
-        Map<String, Observation> result = new LinkedHashMap<>();
-        var selected = sections.isEmpty() ? List.of("CORE", "ENGAGEMENT", "DAILY", "REACH", "TRAFFIC") : sections;
-        for (String section : selected) {
-            switch (section) {
-                case "REACH" -> {
-                    var observed = reach.reach(channel(), id, range.from(), range.to());
-                    var last = observed.daily().isEmpty() ? null : observed.daily().getLast().date();
-                    result.put(section, new Observation(observed.source(), range, clock.instant(), last,
-                            observed.availability(), observed));
-                }
-                case "TRAFFIC" -> {
-                    var sources = analytics.getTrafficSources(id, range.from(), range.to());
-                    result.put(section, observation(range, sources, null));
-                }
-                case "SEARCH_TERMS", "SUGGESTED_VIDEOS", "EXTERNAL_DETAILS" -> {
-                    String source = switch (section) {
-                        case "SEARCH_TERMS" -> "YT_SEARCH";
-                        case "SUGGESTED_VIDEOS" -> "RELATED_VIDEO";
-                        default -> "EXT_URL";
-                    };
-                    result.put(section, optional(range,
-                            () -> analytics.getTrafficSourceDetails(id, source, range.from(), range.to(), 20)));
-                }
-                case "RETENTION" -> result.put(section, optional(range, () -> {
-                    var rows = rows(id, range, "RETENTION");
-                    return rows.isEmpty() ? List.of() : retention(rows, video.durationSeconds());
-                }));
-                case "DAILY" -> {
-                    var trend = rows(id, range, section);
-                    LocalDate latest = trend.isEmpty() ? null : LocalDate.parse(trend.getLast().get("day").toString());
-                    result.put(section, observation(range, trend, latest));
-                }
-                case "MONETARY", "ADS" -> {
-                    var scopes = tokens.requireCredential().getScopes();
-                    if (scopes == null || Arrays.stream(scopes.split("\\s+"))
-                            .noneMatch(it.chewbecca.youtubeanalytics.oauth.YoutubeOAuthService.MONETARY_ANALYTICS_SCOPE::equals)) {
-                        result.put(section, new Observation("YouTube Analytics API", range, clock.instant(), null,
-                                "UNAUTHORIZED", null));
-                    } else {
-                        result.put(section, optional(range, () -> rows(id, range, section)));
-                    }
-                }
-                case "END_SCREENS" -> {
-                    var totals = endScreens.totals(channel(), id, range.from(), range.to());
-                    var last = totals.daily().isEmpty() ? null : totals.daily().getLast().date();
-                    result.put(section, new Observation("YouTube Reporting API/channel_end_screens_a2", range,
-                            clock.instant(), last, totals.availability(), totals));
-                }
-                case "ENGAGED_VIEWS" -> result.put(section, optional(range, () -> rows(id, range, section)));
-                case "CORE", "ENGAGEMENT" -> result.put(section, observation(range, rows(id, range, section), null));
-                default -> throw new IllegalArgumentException("Sezione performance sconosciuta: " + section);
-            }
-        }
-        return new Detail(view(video), range, result, List.of(
-                "Date giornaliere Google in Pacific Time. L'ultimo giorno effettivo è indicato quando osservabile.",
-                "Visualizzazioni feed Shorts: sorgente SHORTS se restituita. Swiped away non disponibile in queste API.",
-                "Formule editoriali facoltative: (like + commenti + condivisioni) / views; iscritti acquisiti / views; RPM stimato: ricavo stimato / views × 1000. Usa la stessa finestra e solo valori disponibili."));
+    public ChannelDetail channelMetrics(LocalDate from, LocalDate to, List<String> sections) {
+        LocalDate end = to == null ? LocalDate.now(clock.withZone(PACIFIC)) : to;
+        var range = valid(from == null ? end.minusDays(27) : from, end);
+        String owner = channel();
+        return new ChannelDetail(owner, range, advisorMetrics.read(owner, null, null, range, sections), AdvisorMetrics.NOTES);
     }
 
     public Benchmark benchmark(String id, int ageDays) {
@@ -140,7 +86,8 @@ public class PerformanceAdvisor {
             var row = sample(candidate, age(candidate, ageDays), true);
             if (row.views() != null) base.add(new Sample(row.video(), row.views(), row.watchMinutes(),
                     row.averageViewPercentage(), row.impressions(), row.ctr(), row.at30(), row.at60(),
-                    row.subscriberConversion(), row.mainTraffic(), null));
+                    row.subscriberConversion(), row.mainTraffic(), null, row.engagedViews(), row.at3(), row.at10(),
+                    row.averageViewDurationSeconds()));
         }
         var sameTraffic = target.mainTraffic() == null ? List.<Sample>of() : base.stream()
                 .filter(row -> target.mainTraffic().equals(row.mainTraffic())).toList();
@@ -150,9 +97,14 @@ public class PerformanceAdvisor {
         distribution(cohort, Sample::impressions, "impressions", benchmarks);
         distribution(cohort, Sample::ctr, "ctr", benchmarks);
         distribution(cohort, Sample::watchMinutes, "watchMinutes", benchmarks);
+        distribution(cohort, Sample::at3, "at3", benchmarks);
+        distribution(cohort, Sample::at10, "at10", benchmarks);
         distribution(cohort, Sample::at30, "at30", benchmarks);
         distribution(cohort, Sample::at60, "at60", benchmarks);
         distribution(cohort, Sample::subscriberConversion, "subscriberConversion", benchmarks);
+        distribution(cohort, Sample::engagedViews, "engagedViews", benchmarks);
+        distribution(cohort, Sample::averageViewDurationSeconds, "averageViewDurationSeconds", benchmarks);
+        distribution(cohort, Sample::averageViewPercentage, "averageViewPercentage", benchmarks);
         String confidence = cohort.size() >= 6 && sameTraffic.size() >= 3 ? "MEDIUM"
                 : cohort.size() >= 3 ? "LOW" : "INSUFFICIENT_DATA";
         return new Benchmark(ageDays, targetWindow, confidence, cohort, benchmarks, target,
@@ -183,6 +135,12 @@ public class PerformanceAdvisor {
                     && standsOut(target.retention())) {
                 hypotheses.add(new Hypothesis("D", "MEDIUM", "Rivedi il segmento di abbandono per i prossimi montaggi.",
                         Map.of("at30", target.at30(), "segment", target.retention().largestDrop()), "LOW"));
+            }
+            if ("SHORT".equals(target.video().format()) && below(target.at3(), stats.get("at3"))
+                    && below(target.averageViewPercentage(), stats.get("averageViewPercentage"))) {
+                hypotheses.add(new Hypothesis("SHORT_HOOK", "HIGH",
+                        "Controlla l'apertura e il ritmo nei primi secondi dello Short.",
+                        evidence(target, stats, "at3", "averageViewPercentage"), benchmark.confidence()));
             }
             if (above(target.views(), stats.get("views"), .5)
                     && below(target.subscriberConversion(), stats.get("subscriberConversion"))) {
@@ -278,7 +236,7 @@ public class PerformanceAdvisor {
         var core = reports.isEmpty() ? Map.<String, Object>of() : reports.getFirst();
         var engagement = extended ? rows(id, window, "ENGAGEMENT") : List.<Map<String, Object>>of();
         var impressions = reach.reach(channel(), id, window.from(), window.to());
-        var ret = optional(window, () -> {
+        var ret = advisorMetrics.optional(window, () -> {
             var rr = rows(id, window, "RETENTION");
             return rr.isEmpty() ? List.of() : retention(rr, video.durationSeconds());
         });
@@ -288,32 +246,20 @@ public class PerformanceAdvisor {
                 .map(YouTubeAnalyticsClient.BreakdownMetric::dimensionValue).orElse(null) : null;
         Double views = number(core, "views");
         Double subs = engagement.isEmpty() ? null : number(engagement.getFirst(), "subscribersGained");
+        Double engaged = null;
+        if (extended && "SHORT".equals(format(video))) {
+            var result = advisorMetrics.optional(window, () -> rows(id, window, "ENGAGED_VIEWS"));
+            if (result.data() instanceof List<?> list && !list.isEmpty() && list.getFirst() instanceof Map<?, ?> map
+                    && map.get("engagedViews") instanceof Number measured) engaged = measured.doubleValue();
+        }
         return new Sample(view(video), views, number(core, "estimatedMinutesWatched"),
                 number(core, "averageViewPercentage"),
                 "AVAILABLE".equals(impressions.availability()) ? impressions.impressions() : null,
                 "AVAILABLE".equals(impressions.ctrAvailability()) ? impressions.ctr() : null,
                 retention == null ? null : retention.at30(), retention == null ? null : retention.at60(),
-                subs == null || views == null || views <= 0 ? null : subs / views, traffic, retention);
-    }
-
-    private Observation optional(Window window, java.util.function.Supplier<?> get) {
-        try {
-            return observation(window, get.get(), null);
-        } catch (GoogleApiException error) {
-            if (error.getStatusCode() == 400 || error.getStatusCode() == 403
-                    && !it.chewbecca.youtubeanalytics.client.YouTubeStudioClient.quota(error)) {
-                return new Observation("YouTube Analytics API", window, clock.instant(), null,
-                        "UNAVAILABLE_OR_UNSUPPORTED", null);
-            }
-            throw error;
-        }
-    }
-
-    private Observation observation(Window window, Object value, LocalDate latest) {
-        boolean empty = value instanceof Collection<?> collection && collection.isEmpty();
-        String state = empty ? "NO_ROWS" : window.to().isAfter(lastConservativeDay()) ? "MAY_BE_PARTIAL" : "RETURNED";
-        if (latest != null && latest.isBefore(window.to())) state = "PARTIAL";
-        return new Observation("YouTube Analytics API", window, clock.instant(), latest, state, empty ? null : value);
+                subs == null || views == null || views <= 0 ? null : subs / views, traffic, retention, engaged,
+                retention == null ? null : retention.at3(), retention == null ? null : retention.at10(),
+                number(core, "averageViewDuration"));
     }
 
     private List<Map<String, Object>> rows(String id, Window window, String report) {
@@ -337,7 +283,8 @@ public class PerformanceAdvisor {
         }
         return new Retention(at(points, duration, 30), at(points, duration, 60), largest,
                 points.stream().filter(p -> p.watchRatio() != null && p.watchRatio() > 1)
-                        .sorted(Comparator.comparingDouble(Segment::watchRatio).reversed()).limit(5).toList(), points);
+                        .sorted(Comparator.comparingDouble(Segment::watchRatio).reversed()).limit(5).toList(), points,
+                at(points, duration, 3), at(points, duration, 10));
     }
 
     private static boolean standsOut(Retention retention) {
@@ -374,7 +321,9 @@ public class PerformanceAdvisor {
             Number observed = switch (field) {
                 case "impressions" -> target.impressions();
                 case "ctr" -> target.ctr();
+                case "at3" -> target.at3();
                 case "at30" -> target.at30();
+                case "averageViewPercentage" -> target.averageViewPercentage();
                 case "subscriberConversion" -> target.subscriberConversion();
                 default -> target.views();
             };
@@ -491,11 +440,14 @@ public class PerformanceAdvisor {
     public record Observation(String source, Window requestedPeriod, Instant fetchedAt, LocalDate lastObservedDay,
                               String availability, Object data) {}
     public record Detail(VideoView video, Window period, Map<String, Observation> metrics, List<String> notes) {}
+    public record ChannelDetail(String channelId, Window period, Map<String, Observation> metrics, List<String> notes) {}
     public record Segment(double seconds, Double watchRatio, Double relativeRetention) {}
     public record Drop(double fromSeconds, double toSeconds, double drop) {}
-    public record Retention(Double at30, Double at60, Drop largestDrop, List<Segment> replayed, List<Segment> curve) {}
+    public record Retention(Double at30, Double at60, Drop largestDrop, List<Segment> replayed, List<Segment> curve,
+                            Double at3, Double at10) {}
     public record Sample(VideoView video, Double views, Double watchMinutes, Double averageViewPercentage, Long impressions,
-                         Double ctr, Double at30, Double at60, Double subscriberConversion, String mainTraffic, Retention retention) {}
+                         Double ctr, Double at30, Double at60, Double subscriberConversion, String mainTraffic, Retention retention,
+                         Double engagedViews, Double at3, Double at10, Double averageViewDurationSeconds) {}
     public record Distribution(int sample, double p25, double median, double p75) {}
     public record Benchmark(int ageDays, Window targetPeriod, String confidence, List<Sample> peers,
                             Map<String, Distribution> percentiles, Sample target, String method) {}
