@@ -145,6 +145,7 @@ public class ChewbeccaMcpReelTools {
                 reels.requireSchedulingPermission();
                 var args = request.arguments();
                 var window = new InstagramReelSchedule.DateWindow(date(args, "start_date"), date(args, "end_date"));
+                OpenAiFileDownloadService.diagnoseAttachment("instagram_reel", args.get("file"));
                 if (!(args.get("file") instanceof Map<?, ?> attachment)) {
                     throw new IllegalArgumentException("Allega il file MP4 a ChatGPT");
                 }
@@ -203,6 +204,7 @@ public class ChewbeccaMcpReelTools {
                     var result = batches.existing(id, draft);
                     return response(json, Map.of("batchId", id, "position", position, "receipt", result.receipt()), result.cover());
                 }
+                OpenAiFileDownloadService.diagnoseAttachment("instagram_batch_reel", args.get("file"));
                 if (!(args.get("file") instanceof Map<?, ?> attachment))
                     throw new IllegalArgumentException("Allega il file MP4 della posizione approvata");
                 var source = new OpenAiFileDownloadService.FileInput(string(attachment.get("download_url")),
