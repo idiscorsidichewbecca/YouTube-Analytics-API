@@ -25,6 +25,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class InstagramReelScheduleTest {
+    private static final InstagramReelSchedule.DateWindow DEFAULT_WINDOW = new InstagramReelSchedule.DateWindow(null, null);
+
     @TempDir Path staging;
     private JdbcTemplate db;
     private final InstagramGraphClient graph = mock(InstagramGraphClient.class);
@@ -50,9 +52,9 @@ class InstagramReelScheduleTest {
         var schedule = new InstagramReelSchedule(db, graph, assets, clock, true);
         Path first = Files.writeString(staging.resolve("first.mp4"), "video first");
         Path second = Files.writeString(staging.resolve("second.mp4"), "video second");
-        var a = schedule.schedule(first, "Titolo A", "Descrizione", "TESTO A", 2, ReelCoverTemplate.PERSONAGGIO).receipt();
-        var b = schedule.schedule(second, "Titolo B", "Descrizione", "TESTO B", 2, ReelCoverTemplate.LUOGO).receipt();
-        var retry = schedule.schedule(first, "Altro titolo", "Descrizione", "TESTO C", 2, ReelCoverTemplate.EVENTO).receipt();
+        var a = schedule.schedule(first, "Titolo A", "Descrizione", "TESTO A", 2, ReelCoverTemplate.PERSONAGGIO, DEFAULT_WINDOW).receipt();
+        var b = schedule.schedule(second, "Titolo B", "Descrizione", "TESTO B", 2, ReelCoverTemplate.LUOGO, DEFAULT_WINDOW).receipt();
+        var retry = schedule.schedule(first, "Altro titolo", "Descrizione", "TESTO C", 2, ReelCoverTemplate.EVENTO, DEFAULT_WINDOW).receipt();
         assertEquals("SCHEDULED", a.reel().state());
         assertEquals(ZoneOffset.ofHours(1), a.reel().publishAt().getOffset());
         assertEquals(a.reel().id(), retry.reel().id());
@@ -65,10 +67,33 @@ class InstagramReelScheduleTest {
     }
 
     @Test
+    void selectsOnlyWithinEachInclusiveWindowAndRejectsAnOccupiedDay() throws Exception {
+        var schedule = new InstagramReelSchedule(db, graph, assets, clock, true);
+        Path first = Files.writeString(staging.resolve("first.mp4"), "video first");
+        Path second = Files.writeString(staging.resolve("second.mp4"), "video second");
+        LocalDate dayOne = LocalDate.parse("2026-11-30");
+        LocalDate dayTwo = LocalDate.parse("2026-12-01");
+        var firstWindow = new InstagramReelSchedule.DateWindow(dayOne, dayOne);
+        var secondWindow = new InstagramReelSchedule.DateWindow(dayTwo, dayTwo);
+        var a = schedule.schedule(first, "Titolo A", "Descrizione", "TESTO A", 2,
+                ReelCoverTemplate.PERSONAGGIO, firstWindow).receipt();
+        assertEquals(dayOne, a.reel().publishAt().toLocalDate());
+        assertThrows(IllegalStateException.class, () -> schedule.schedule(second, "Titolo B",
+                "Descrizione", "TESTO B", 2, ReelCoverTemplate.LUOGO, firstWindow));
+        var b = schedule.schedule(second, "Titolo B", "Descrizione", "TESTO B", 2,
+                ReelCoverTemplate.LUOGO, secondWindow).receipt();
+        assertEquals(dayTwo, b.reel().publishAt().toLocalDate());
+        assertThrows(IllegalStateException.class, () -> schedule.schedule(first, "Titolo A",
+                "Descrizione", "TESTO A", 2, ReelCoverTemplate.PERSONAGGIO, secondWindow));
+        assertEquals(2, schedule.status(null).size());
+        verify(assets, times(2)).store(anyString(), any(), anyString(), anyDouble(), any());
+    }
+
+    @Test
     void usesMetaCustomCoverAndNeverRetriesAnUncertainPublish() throws Exception {
         var schedule = new InstagramReelSchedule(db, graph, assets, clock, true);
         var reel = schedule.schedule(Files.writeString(staging.resolve("first.mp4"), "video"),
-                "Titolo", "Descrizione", "TESTO", 2, ReelCoverTemplate.PERSONAGGIO).receipt().reel();
+                "Titolo", "Descrizione", "TESTO", 2, ReelCoverTemplate.PERSONAGGIO, DEFAULT_WINDOW).receipt().reel();
         var worker = new InstagramReelWorker(db, graph, assets, clock, "https://example.com", true);
         when(clock.instant()).thenReturn(reel.publishAt().minusMinutes(5).toInstant());
         when(graph.createReel(eq("123"), endsWith("/reel.mp4"), endsWith("/cover.jpg"), eq(reel.caption())))
@@ -108,7 +133,7 @@ class InstagramReelScheduleTest {
         assertEquals(2, observations.size());
         assertEquals(13, observations.getFirst().at().getHour());
         var occupied = Set.of(LocalDate.of(2026, 12, 2));
-        var ranked = ReelSlotPlanner.rank(today, occupied, observations);
+        var ranked = ReelSlotPlanner.rank(today, today.toLocalDate(), today.toLocalDate().plusDays(20), occupied, observations);
         assertEquals(OffsetDateTime.parse("2026-12-09T18:00:00+01:00"), ranked.getFirst().at());
         assertTrue(ranked.stream().noneMatch(slot -> occupied.contains(slot.at().toLocalDate())));
         assertTrue(ranked.stream().allMatch(slot -> slot.at().toInstant().isBefore(today.plusDays(21).toInstant())));

@@ -54,13 +54,39 @@ public class InstagramReelSchedule {
     public record Receipt(Status reel, String evidence, Integer comparableReels, Integer dayAndHourSamples) {}
     public record ScheduledReel(Receipt receipt, byte[] cover) {}
 
+    public record DateWindow(LocalDate startDate, LocalDate endDate) {
+        public DateWindow {
+            if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+                throw new IllegalArgumentException("start_date deve precedere o coincidere con end_date");
+            }
+        }
+
+        boolean contains(LocalDate day) {
+            return (startDate == null || !day.isBefore(startDate)) && (endDate == null || !day.isAfter(endDate));
+        }
+
+        DateWindow withinHorizon(LocalDate today) {
+            LocalDate horizon = today.plusDays(ReelSlotPlanner.HORIZON_DAYS - 1L);
+            if ((endDate != null && (endDate.isBefore(today) || endDate.isAfter(horizon)))
+                    || (startDate != null && startDate.isAfter(horizon))) {
+                throw new IllegalArgumentException("L'intervallo Reel deve includere almeno un giorno e terminare entro " + horizon);
+            }
+            LocalDate first = startDate == null || startDate.isBefore(today) ? today : startDate;
+            return new DateWindow(first, endDate == null ? horizon : endDate);
+        }
+
+        boolean hasBounds() {
+            return startDate != null || endDate != null;
+        }
+    }
+
     public String requireSchedulingPermission() {
         if (!live) throw new IllegalStateException("La pubblicazione automatica dei Reel è disabilitata su Render");
         return graph.requirePublishingConnection().accountId();
     }
 
     public ScheduledReel schedule(Path video, String title, String description, String headline,
-                                 double frameSeconds, ReelCoverTemplate template) throws IOException {
+                                 double frameSeconds, ReelCoverTemplate template, DateWindow requested) throws IOException {
         String account = requireSchedulingPermission();
         title = text(title, 120, "Titolo");
         description = text(description, 2080, "Descrizione");
@@ -68,13 +94,15 @@ public class InstagramReelSchedule {
         if (!Double.isFinite(frameSeconds) || frameSeconds < 0) {
             throw new IllegalArgumentException("Il secondo per la copertina deve essere positivo o zero");
         }
+        ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(ReelSlotPlanner.ROME);
+        var window = requested.withinHorizon(now.toLocalDate());
         String sourceHash = ReelAssets.sourceHash(video);
         var existing = existing(account, sourceHash);
-        if (existing != null) return duplicate(existing);
+        if (existing != null) return duplicate(existing, requested);
 
-        ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(ReelSlotPlanner.ROME);
-        var occupied = new HashSet<>(db.query("SELECT slot_date FROM ig_reel_schedule WHERE account_id=? AND slot_date>=?",
-                (rs, i) -> rs.getObject(1, LocalDate.class), account, now.toLocalDate()));
+        var occupied = new HashSet<>(db.query("""
+                SELECT slot_date FROM ig_reel_schedule WHERE account_id=? AND slot_date BETWEEN ? AND ?
+                """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(), window.endDate()));
         List<ReelSlotPlanner.Observation> history;
         String note = "";
         try {
@@ -83,8 +111,11 @@ public class InstagramReelSchedule {
             history = List.of();
             note = "; storico Instagram non raggiungibile";
         }
-        List<ReelSlotPlanner.Slot> options = ReelSlotPlanner.rank(now, occupied, history);
-        if (options.isEmpty()) throw new IllegalStateException("Nessun giorno libero per un Reel nelle prossime tre settimane");
+        var options = ReelSlotPlanner.rank(now, window.startDate(), window.endDate(), occupied, history);
+        if (options.isEmpty()) {
+            throw new IllegalStateException("Nessun orario disponibile per il Reel dal " + window.startDate()
+                    + " al " + window.endDate());
+        }
         String key = HexFormat.of().formatHex(RANDOM.generateSeed(32));
         assets.store(key, video, headline, frameSeconds, template);
         boolean saved = false;
@@ -108,7 +139,7 @@ public class InstagramReelSchedule {
                             option.evidence() + note, option.comparableReels(), option.matchingDayAndHour()), cover);
                 } catch (DuplicateKeyException ex) {
                     existing = existing(account, sourceHash);
-                    if (existing != null) return duplicate(existing);
+                    if (existing != null) return duplicate(existing, requested);
                 }
             }
             throw new IllegalStateException("I giorni disponibili sono stati occupati. Riprova per aggiornare il piano");
@@ -135,7 +166,11 @@ public class InstagramReelSchedule {
                 .stream().findFirst().orElse(null);
     }
 
-    private ScheduledReel duplicate(Job job) throws IOException {
+    private ScheduledReel duplicate(Job job, DateWindow requested) throws IOException {
+        if (requested.hasBounds() && !requested.contains(job.status().publishAt().toLocalDate())) {
+            throw new IllegalStateException("Il Reel è già registrato per " + job.status().publishAt()
+                    + ", fuori dall'intervallo richiesto. ID: " + job.id());
+        }
         byte[] preview = assets.read(job.key(), ReelAssets.COVER).exists() ? assets.preview(job.key()) : null;
         return new ScheduledReel(new Receipt(job.status(), "Questo MP4 è già registrato; stato esistente", null, null), preview);
     }

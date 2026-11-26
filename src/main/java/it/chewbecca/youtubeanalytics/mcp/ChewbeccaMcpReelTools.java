@@ -14,6 +14,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -50,8 +52,10 @@ public class ChewbeccaMcpReelTools {
                         PERSONAGGIO per un volto o una figura, LUOGO per una nave, un edificio o un pianeta, EVENTO per una
                         scena distintiva. Al momento della programmazione il backend applica uno dei tre modelli del progetto
                         al fotogramma e restituisce la copertina: soggetto del Reel in primo piano, titolo piccolo, toni discreti.
-                        Il backend seleziona giorno e ora in Europe/Rome nelle prossime tre settimane usando lo storico
-                        Instagram e la coda già presente. Riporta campione e motivazione. Presenta le fasce esplorative come
+                        Se l'utente indica giorni o settimane, passa start_date e end_date inclusivi in Europe/Rome.
+                        Per Reel in settimane diverse, passa la finestra specifica per ciascun MP4. Senza date, il backend
+                        sceglie nelle prossime tre settimane. In ogni caso confronta lo storico Instagram e i giorni occupati
+                        nella coda di Chewbecca Studio. Riporta campione e motivazione. Presenta le fasce esplorative come
                         stime. Non usare le metriche YouTube. Instagram usa il titolo come prima riga della didascalia.
                         Una richiesta utente di soli orari, idee o bozze non autorizza la programmazione.
                         Mostra la copertina, titolo, stato, orario e ID per ogni Reel effettivamente programmato.
@@ -64,7 +68,9 @@ public class ChewbeccaMcpReelTools {
                         "cover_template", Map.of("type", "string", "enum", List.of("PERSONAGGIO", "LUOGO", "EVENTO"),
                                 "description", "Modello del progetto adatto al soggetto del fotogramma", "default", "PERSONAGGIO"),
                         "cover_second", Map.of("type", "number", "minimum", 0,
-                                "description", "Secondo del fotogramma scelto nel video stesso")),
+                                "description", "Secondo del fotogramma scelto nel video stesso"),
+                        "start_date", text("Primo giorno consentito incluso, YYYY-MM-DD, ora italiana"),
+                        "end_date", text("Ultimo giorno consentito incluso, YYYY-MM-DD, ora italiana")),
                         List.of("file", "title", "description", "cover_headline", "cover_second"),
                         false, Map.of("OpenAIFile", file), null))
                 .annotations(new McpSchema.ToolAnnotations("Programma un Reel su Instagram", false, true, true, true, false))
@@ -83,6 +89,7 @@ public class ChewbeccaMcpReelTools {
                 scope("write");
                 reels.requireSchedulingPermission();
                 var args = request.arguments();
+                var window = new InstagramReelSchedule.DateWindow(date(args, "start_date"), date(args, "end_date"));
                 if (!(args.get("file") instanceof Map<?, ?> attachment)) {
                     throw new IllegalArgumentException("Allega il file MP4 a ChatGPT");
                 }
@@ -96,7 +103,7 @@ public class ChewbeccaMcpReelTools {
                 InstagramReelSchedule.ScheduledReel result;
                 try {
                     result = reels.schedule(download, string(args.get("title")), string(args.get("description")),
-                            string(args.get("cover_headline")), second.doubleValue(), template);
+                            string(args.get("cover_headline")), second.doubleValue(), template, window);
                 } finally {
                     try { Files.deleteIfExists(download); } catch (IOException ignored) {
                         // The receipt must still be returned if scheduling succeeded.
@@ -148,6 +155,19 @@ public class ChewbeccaMcpReelTools {
 
     private static Map<String, Object> text(String description) {
         return Map.of("type", "string", "description", description);
+    }
+
+    private static LocalDate date(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) return null;
+        if (value instanceof String text) {
+            try {
+                return LocalDate.parse(text.strip());
+            } catch (DateTimeParseException ignored) {
+                // Return the same actionable error for each invalid input type.
+            }
+        }
+        throw new IllegalArgumentException(key + " deve essere una data nel formato YYYY-MM-DD");
     }
 
     private static String string(Object value) {
