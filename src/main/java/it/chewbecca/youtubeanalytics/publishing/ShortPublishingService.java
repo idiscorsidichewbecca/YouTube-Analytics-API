@@ -1,5 +1,7 @@
 package it.chewbecca.youtubeanalytics.publishing;
 
+import it.chewbecca.youtubeanalytics.chatgpt.OpenAiFileDownloadService;
+
 import it.chewbecca.youtubeanalytics.oauth.GoogleAccessTokenService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -125,7 +127,7 @@ public class ShortPublishingService {
     }
 
     public ShortDraft scheduleBatch(ShortDraft draft, MultipartFile video, String fileId) {
-        if (draft.getBatchId() == null || fileId == null || !fileId.matches("file_[A-Za-z0-9_-]{8,128}")) {
+        if (draft.getBatchId() == null || !OpenAiFileDownloadService.isValidFileId(fileId)) {
             throw new IllegalArgumentException("Allegato non valido per il batch");
         }
         return schedule(draft, video, null, null, null, fileId);
