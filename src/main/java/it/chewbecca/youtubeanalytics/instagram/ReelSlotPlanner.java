@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 final class ReelSlotPlanner {
     static final ZoneId ROME = ZoneId.of("Europe/Rome");
+    static final int HORIZON_DAYS = 21;
     private static final int MIN_REELS = 8;
 
     record Observation(ZonedDateTime at, int cohort, double interactions) {}
@@ -46,7 +47,8 @@ final class ReelSlotPlanner {
         return observations;
     }
 
-    static List<Slot> rank(ZonedDateTime now, Set<LocalDate> occupied, List<Observation> observations) {
+    static List<Slot> rank(ZonedDateTime now, LocalDate first, LocalDate last,
+                           Set<LocalDate> occupied, List<Observation> observations) {
         Map<Integer, List<Observation>> cohorts = observations.stream().collect(Collectors.groupingBy(Observation::cohort));
         var comparable = cohorts.values().stream().filter(group -> group.size() >= 3)
                 .flatMap(group -> {
@@ -55,7 +57,7 @@ final class ReelSlotPlanner {
                             Math.max(-2, Math.min(2, Math.log((o.interactions() + 1) / (median + 1))))));
                 }).toList();
         var candidates = new ArrayList<Slot>();
-        for (var day = now.toLocalDate(); day.isBefore(now.toLocalDate().plusDays(21)); day = day.plusDays(1)) {
+        for (var day = first; !day.isAfter(last); day = day.plusDays(1)) {
             if (occupied.contains(day)) continue;
             for (int hour = 0; hour < 24; hour++) {
                 var at = day.atTime(hour, 0).atZone(ROME);
