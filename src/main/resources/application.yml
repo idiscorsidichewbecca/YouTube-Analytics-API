@@ -90,6 +90,9 @@ app:
     public-url: ${APP_INSTAGRAM_PUBLIC_URL:${MCP_PUBLIC_URL:}}
     scheduler-delay-ms: ${APP_INSTAGRAM_SCHEDULER_DELAY_MS:30000}
     insights-delay-ms: ${APP_INSTAGRAM_INSIGHTS_DELAY_MS:300000}
+    reels-enabled: ${APP_INSTAGRAM_REELS_ENABLED:true}
+    reels-live-enabled: ${APP_INSTAGRAM_REELS_LIVE_ENABLED:true}
+    reels-storage: ${APP_INSTAGRAM_REELS_STORAGE:/var/data/instagram-reels}
   telegram:
     enabled: ${TELEGRAM_ENABLED:false}
     bot-token: ${TELEGRAM_BOT_TOKEN:}
