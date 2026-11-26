@@ -87,6 +87,12 @@ public class InstagramReelSchedule {
 
     public ScheduledReel schedule(Path video, String title, String description, String headline,
                                  double frameSeconds, ReelCoverTemplate template, DateWindow requested) throws IOException {
+        return scheduleAt(video, title, description, headline, frameSeconds, template, requested, null);
+    }
+
+    public ScheduledReel scheduleAt(Path video, String title, String description, String headline,
+                                    double frameSeconds, ReelCoverTemplate template, DateWindow requested,
+                                    OffsetDateTime fixedAt) throws IOException {
         String account = requireSchedulingPermission();
         title = text(title, 120, "Titolo");
         description = text(description, 2080, "Descrizione");
@@ -103,6 +109,13 @@ public class InstagramReelSchedule {
         var occupied = new HashSet<>(db.query("""
                 SELECT slot_date FROM ig_reel_schedule WHERE account_id=? AND slot_date BETWEEN ? AND ?
                 """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(), window.endDate()));
+        if (fixedAt == null) {
+            occupied.addAll(db.query("""
+                    SELECT slot_date FROM ig_reel_batch_draft WHERE account_id=? AND slot_date BETWEEN ? AND ?
+                    AND publish_at>?
+                    """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(),
+                    window.endDate(), OffsetDateTime.now(clock)));
+        }
         List<ReelSlotPlanner.Observation> history;
         String note = "";
         try {
@@ -112,6 +125,9 @@ public class InstagramReelSchedule {
             note = "; storico Instagram non raggiungibile";
         }
         var options = ReelSlotPlanner.rank(now, window.startDate(), window.endDate(), occupied, history);
+        if (fixedAt != null) {
+            options = options.stream().filter(slot -> slot.at().toInstant().equals(fixedAt.toInstant())).toList();
+        }
         if (options.isEmpty()) {
             throw new IllegalStateException("Nessun orario disponibile per il Reel dal " + window.startDate()
                     + " al " + window.endDate());
@@ -146,6 +162,34 @@ public class InstagramReelSchedule {
         } finally {
             if (!saved) assets.remove(key);
         }
+    }
+
+    public record PlannedSlot(OffsetDateTime publishAt, String evidence, int comparableReels, int dayAndHourSamples) {}
+
+    public List<PlannedSlot> planBatch(DateWindow requested, int count, java.util.Set<LocalDate> reserved) {
+        String account = requireSchedulingPermission();
+        ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(ReelSlotPlanner.ROME);
+        var window = requested.withinHorizon(now.toLocalDate());
+        var occupied = new HashSet<>(db.query("""
+                SELECT slot_date FROM ig_reel_schedule WHERE account_id=? AND slot_date BETWEEN ? AND ?
+                """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(), window.endDate()));
+        occupied.addAll(reserved);
+        List<ReelSlotPlanner.Observation> history;
+        String note = "";
+        try {
+            history = ReelSlotPlanner.observations(graph.recentMedia(account), now);
+        } catch (RuntimeException ex) {
+            history = List.of();
+            note = "; storico Instagram non raggiungibile";
+        }
+        var chosen = new java.util.ArrayList<PlannedSlot>();
+        for (var slot : ReelSlotPlanner.rank(now, window.startDate(), window.endDate(), occupied, history)) {
+            if (!occupied.add(slot.at().toLocalDate())) continue;
+            chosen.add(new PlannedSlot(slot.at(), slot.evidence() + note, slot.comparableReels(), slot.matchingDayAndHour()));
+            if (chosen.size() == count) break;
+        }
+        if (chosen.size() != count) throw new IllegalStateException("Giorni liberi insufficienti nell'intervallo richiesto");
+        return chosen.stream().sorted(java.util.Comparator.comparing(PlannedSlot::publishAt)).toList();
     }
 
     public List<Status> status(String id) {
