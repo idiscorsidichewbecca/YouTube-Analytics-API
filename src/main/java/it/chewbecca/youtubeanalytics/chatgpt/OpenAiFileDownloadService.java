@@ -61,10 +61,21 @@ public class OpenAiFileDownloadService {
                 : attachment instanceof String ? "string" : attachment instanceof java.util.List ? "array" : "other";
         boolean urlPresent = raw.get("download_url") instanceof String url && StringUtils.hasText(url);
         boolean idPresent = raw.get("file_id") instanceof String id && StringUtils.hasText(id);
-        boolean idValid = raw.get("file_id") instanceof String id && id.matches("file_[A-Za-z0-9_-]{8,128}");
+        boolean idValid = raw.get("file_id") instanceof String id && isValidFileId(id);
         log.info("MCP_ATTACHMENT_DIAGNOSTICS operation={} shape={} attachmentPresent={} receivedKeys={} unknownKeyCount={} downloadUrlPresent={} fileIdPresent={} fileIdValid={}",
                 operation, shape, attachment != null, receivedKeys, raw.size() - receivedKeys.size(),
                 urlPresent, idPresent, idValid);
+    }
+
+    /**
+     * The connector's file reference is opaque, not necessarily a Files API ID.
+     * Keep it bounded (the Shorts batch column is VARCHAR(133)) and reject whitespace
+     * and control characters. It is never used as a URL, path or authorization token.
+     */
+    public static boolean isValidFileId(String id) {
+        return StringUtils.hasText(id) && id.length() <= 133
+                && id.codePoints().noneMatch(c -> Character.isWhitespace(c)
+                        || Character.isSpaceChar(c) || Character.isISOControl(c));
     }
 
     public enum DownloadError {
@@ -93,7 +104,7 @@ public class OpenAiFileDownloadService {
     private URI validate(FileInput file, boolean image) {
         boolean downloadUrlPresent = file != null && StringUtils.hasText(file.downloadUrl());
         boolean fileIdPresent = file != null && StringUtils.hasText(file.fileId());
-        boolean fileIdValid = fileIdPresent && file.fileId().matches("file_[A-Za-z0-9_-]{8,128}");
+        boolean fileIdValid = fileIdPresent && isValidFileId(file.fileId());
         if (!downloadUrlPresent || !fileIdValid) {
             log.warn("MCP_FILE_VALIDATION_FAILED attachmentPresent={} downloadUrlPresent={} fileIdPresent={} fileIdValid={} uploadStarted=false",
                     file != null, downloadUrlPresent, fileIdPresent, fileIdValid);
