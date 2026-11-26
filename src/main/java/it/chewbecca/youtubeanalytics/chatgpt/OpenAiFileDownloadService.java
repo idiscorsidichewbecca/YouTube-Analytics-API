@@ -37,6 +37,13 @@ public class OpenAiFileDownloadService {
     private static final Pattern OPENAI_REGIONAL_FILE_HOST = Pattern.compile(
             "sdmntpr[a-z0-9](?:[a-z0-9-]{0,53}[a-z0-9])?\\.oaiusercontent\\.com",
             Pattern.CASE_INSENSITIVE);
+    // Azure Blob accounts are customer-controlled: a shared prefix alone does
+    // not establish ownership. Trust the two observed regional account names;
+    // further verified accounts can be added using the exact-host configuration.
+    private static final java.util.Set<String> OPENAI_AZURE_FILE_HOSTS = java.util.Set.of(
+            "oaisdmntprdenmarkeast.blob.core.windows.net",
+            "oaisdmntprpolandcentral.blob.core.windows.net");
+
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build();
     private final ChatGptBridgeProperties settings;
@@ -137,6 +144,7 @@ public class OpenAiFileDownloadService {
         // Host esatti configurati + sottodomini regionali OpenAI con pattern rigoroso.
         // Il controllo è sul valore URI.getHost(), non sul testo dell'URL.
         boolean allowed = OPENAI_REGIONAL_FILE_HOST.matcher(host).matches() ||
+                OPENAI_AZURE_FILE_HOSTS.contains(host.toLowerCase(Locale.ROOT)) ||
                 settings.allowedFileHosts().stream()
                         .anyMatch(h -> h != null && host.equalsIgnoreCase(h.trim()));
         if (!allowed) {
