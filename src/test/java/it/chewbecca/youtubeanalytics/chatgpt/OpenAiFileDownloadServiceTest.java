@@ -81,7 +81,7 @@ class OpenAiFileDownloadServiceTest {
 
     @Test void rejectsInvalidFileId() {
         var file = new OpenAiFileDownloadService.FileInput("https://files.oaiusercontent.com/video.mp4",
-                "malformed", "video/mp4", "video.mp4");
+                "malformed id", "video/mp4", "video.mp4");
         assertThatThrownBy(() -> service.validate(file))
                 .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
                 .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.INVALID_FILE);
@@ -100,11 +100,28 @@ class OpenAiFileDownloadServiceTest {
                 .hasMessageContaining("fileIdPresent=false")
                 .hasMessageNotContaining("secret-token");
         assertThatThrownBy(() -> service.validate(new OpenAiFileDownloadService.FileInput(
-                "https://files.oaiusercontent.com/video.mp4", "invalid-secret-id", "video/mp4", "reel.mp4")))
+                "https://files.oaiusercontent.com/video.mp4", "invalid secret id", "video/mp4", "reel.mp4")))
                 .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
                 .hasMessageContaining("fileIdPresent=true")
                 .hasMessageContaining("fileIdValid=false")
-                .hasMessageNotContaining("invalid-secret-id");
+                .hasMessageNotContaining("invalid secret id");
+    }
+
+    @Test void acceptsOpaqueConnectorReferencesWithoutFilesApiPrefix() {
+        for (String id : List.of("file_12345678", "cfile-123456", "48609610-5ff3-49bf-b6dc-4b8bd990a94f",
+                "attachment:123456", "opaque-reference")) {
+            assertThat(service.validate(new OpenAiFileDownloadService.FileInput(
+                    "https://files.oaiusercontent.com/video.mp4", id, "video/mp4", "reel.mp4")))
+                    .extracting(java.net.URI::getHost).isEqualTo("files.oaiusercontent.com");
+        }
+    }
+
+    @Test void rejectsBlankControlWhitespaceAndOversizedReferences() {
+        for (String id : List.of("", " ", "a b", "a\nfile", "a".repeat(134))) {
+            assertThat(OpenAiFileDownloadService.isValidFileId(id)).isFalse();
+        }
+        assertThat(OpenAiFileDownloadService.isValidFileId(null)).isFalse();
+        assertThat(OpenAiFileDownloadService.isValidFileId("a".repeat(133))).isTrue();
     }
 
 }
