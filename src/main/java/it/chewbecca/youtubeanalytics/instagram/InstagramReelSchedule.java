@@ -109,6 +109,13 @@ public class InstagramReelSchedule {
         var occupied = new HashSet<>(db.query("""
                 SELECT slot_date FROM ig_reel_schedule WHERE account_id=? AND slot_date BETWEEN ? AND ?
                 """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(), window.endDate()));
+        if (fixedAt == null) {
+            occupied.addAll(db.query("""
+                    SELECT slot_date FROM ig_reel_batch_draft WHERE account_id=? AND slot_date BETWEEN ? AND ?
+                    AND publish_at>?
+                    """, (rs, i) -> rs.getObject(1, LocalDate.class), account, window.startDate(),
+                    window.endDate(), OffsetDateTime.now(clock)));
+        }
         List<ReelSlotPlanner.Observation> history;
         String note = "";
         try {
