@@ -55,14 +55,57 @@ public class InstagramQuizService {
         }
         return status(batch);
     }
+    /**
+     * Manual single quiz: NOW means enqueue at approval, not at draft creation.
+     * A missing answer time creates only the question story; the solution remains
+     * in the quiz history for verification. Calendar protection remains mandatory.
+     */
+    @Transactional
+    public Batch prepareManual(QuizInput e,String questionAt,String answerAt){
+        if(e==null||questionAt==null)throw new IllegalArgumentException("Quiz e orario domanda obbligatori");
+        var current=now().atZoneSameInstant(ROME).toOffsetDateTime();
+        boolean immediate="NOW".equalsIgnoreCase(questionAt.trim());
+        var atQ=immediate?current:manualTime(questionAt);
+        var atA=answerAt==null||answerAt.isBlank()?null:manualTime(answerAt);
+        if(!immediate&&!atQ.isAfter(current.plusMinutes(2)))throw new IllegalArgumentException("Domanda futura di almeno 2 minuti oppure NOW");
+        if(atA!=null&&(!atA.isAfter(atQ)||!atA.isAfter(current.plusMinutes(2))))throw new IllegalArgumentException("La risposta deve seguire la domanda ed essere futura");
+        var limit=current.atZoneSameInstant(ROME).plusDays(180).toInstant();
+        if(atQ.toInstant().isAfter(limit)||(atA!=null&&atA.toInstant().isAfter(limit)))throw new IllegalArgumentException("Calendario entro i prossimi 180 giorni");
+        String q=valid(e.question,20,300),a=valid(e.answer,20,750),s=valid(e.source,8,800),c=valid(e.continuity,3,10).toUpperCase(Locale.ROOT);
+        if(!Set.of("CANON","LEGENDS").contains(c))throw new IllegalArgumentException("Specificare CANON o LEGENDS");
+        var day=atQ.atZoneSameInstant(ROME).toLocalDate();
+        String hash=hash(q);
+        if(db.queryForObject("SELECT COUNT(*) FROM ig_quiz WHERE account_id=? AND (question_hash=? OR quiz_day=?)",Integer.class,account(),hash,day)>0)throw new IllegalArgumentException("Domanda già utilizzata o giorno già riservato: "+day);
+        var releases=calendar.snapshot();
+        for(var at:atA==null?List.of(atQ):List.of(atQ,atA)){
+            var conflict=YouTubeStoryWindows.conflict(at.toInstant(),releases);
+            if(conflict.isPresent())throw new IllegalArgumentException("Conflitto calendario YouTube: sera protetta "+conflict.get());
+        }
+        String batch=uuid(),id=uuid();
+        db.update("INSERT INTO ig_quiz_batch(id,account_id,status,revision,created_at) VALUES(?,?,'DRAFT',?,?)",batch,account(),uuid(),now());
+        db.update("INSERT INTO ig_quiz(id,batch_id,account_id,position_no,quiz_day,continuity,question,answer,source,question_hash,slot_evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?)",id,batch,account(),1,day,c,q,a,s,hash,encode(Map.of("mode",immediate?"MANUAL_NOW":"MANUAL_FIXED")));
+        insertStory(id,"QUESTION",atQ);
+        if(atA!=null)insertStory(id,"ANSWER",atA);
+        return status(batch);
+    }
+    static OffsetDateTime manualTime(String value){
+        // An explicit offset is required. Reject a mismatched Italian offset,
+        // including non-existent wall times at the spring DST transition.
+        var at=OffsetDateTime.parse(value.trim());
+        if(!ROME.getRules().getValidOffsets(at.toLocalDateTime()).contains(at.getOffset()))
+            throw new IllegalArgumentException("Usare data e ora italiana ISO-8601 con offset corretto");
+        return at;
+    }
     private void insertStory(String quiz,String kind,OffsetDateTime at){db.update("INSERT INTO ig_quiz_story(id,quiz_id,account_id,kind,publish_at,status,asset_key) VALUES(?,?,?,?,?,'DRAFT',?)",uuid(),quiz,account(),kind,at,uuid().replace("-","")+uuid().replace("-",""));}
     @Transactional
     public Batch stage(String batch,int position,byte[] question,byte[] answer){
-        requireDraft(batch); if(Arrays.equals(question,answer))throw new IllegalArgumentException("Domanda e risposta devono essere grafiche distinte");
+        requireDraft(batch); if(question==null||question.length==0||(answer!=null&&(answer.length==0||Arrays.equals(question,answer))))throw new IllegalArgumentException("Grafiche mancanti o identiche");
         var quiz=db.queryForList("SELECT id FROM ig_quiz WHERE batch_id=? AND account_id=? AND position_no=?",String.class,batch,account(),position);
         if(quiz.size()!=1)throw new IllegalArgumentException("Posizione quiz inesistente");
+        boolean paired=stories(quiz.getFirst()).stream().anyMatch(s->"ANSWER".equals(s.kind));
+        if(paired!=(answer!=null))throw new IllegalArgumentException(paired?"Servono entrambe le grafiche":"Questo quiz prevede solo la domanda");
         db.update("UPDATE ig_quiz_story SET image_data=? WHERE quiz_id=? AND kind='QUESTION' AND status='DRAFT'",Base64.getEncoder().encodeToString(question),quiz.getFirst());
-        db.update("UPDATE ig_quiz_story SET image_data=? WHERE quiz_id=? AND kind='ANSWER' AND status='DRAFT'",Base64.getEncoder().encodeToString(answer),quiz.getFirst());
+        if(paired)db.update("UPDATE ig_quiz_story SET image_data=? WHERE quiz_id=? AND kind='ANSWER' AND status='DRAFT'",Base64.getEncoder().encodeToString(answer),quiz.getFirst());
         db.update("UPDATE ig_quiz_batch SET revision=? WHERE id=?",uuid(),batch);return status(batch);
     }
     @Transactional
@@ -70,7 +113,20 @@ public class InstagramQuizService {
         if(!live)throw new IllegalStateException("Pubblicazione Instagram disabilitata (app.instagram.live-enabled=false)");
         var b=lockBatch(id); if(!"DRAFT".equals(b.get("status")))throw new IllegalStateException("Batch non in bozza");
         if(!confirmation(id,(String)b.get("revision")).equals(confirmation))throw new IllegalArgumentException("Conferma esplicita della revisione corrente richiesta");
-        var current=status(id); if(current.quizzes.stream().flatMap(q->q.stories.stream()).anyMatch(s->!s.hasImage||!s.publishAt.isAfter(now().plusMinutes(2))))throw new IllegalStateException("Mancano immagini oppure alcuni orari sono scaduti");
+        var current=status(id);
+        var approvedAt=now().atZoneSameInstant(ROME).toOffsetDateTime();
+        var immediateIds=new HashSet<String>();
+        for(var q:current.quizzes){
+            if(q.slotEvidence.equals(encode(Map.of("mode","MANUAL_NOW")))){
+                if(!q.day.equals(approvedAt.toLocalDate()))throw new IllegalStateException("Bozza NOW di un altro giorno; creare una nuova bozza");
+                for(var story:q.stories)if("QUESTION".equals(story.kind)){
+                    immediateIds.add(story.id);
+                    db.update("UPDATE ig_quiz_story SET publish_at=? WHERE id=? AND status='DRAFT'",approvedAt,story.id);
+                }
+            }
+        }
+        current=status(id);
+        if(current.quizzes.stream().flatMap(q->q.stories.stream()).anyMatch(s->!s.hasImage||(!immediateIds.contains(s.id)&&!s.publishAt.isAfter(approvedAt.plusMinutes(2)))))throw new IllegalStateException("Mancano immagini oppure alcuni orari sono scaduti");
         var releases=calendar.snapshot();
         for(var q:current.quizzes) for(var story:q.stories) {
             var conflict=YouTubeStoryWindows.conflict(story.publishAt.toInstant(),releases);
@@ -95,7 +151,8 @@ public class InstagramQuizService {
     }
     public List<byte[]> graphics(String batch,int position){
         var rows=db.queryForList("SELECT s.image_data FROM ig_quiz_story s JOIN ig_quiz q ON q.id=s.quiz_id WHERE q.batch_id=? AND q.account_id=? AND q.position_no=? AND s.image_data IS NOT NULL ORDER BY s.publish_at",String.class,batch,account(),position);
-        if(rows.size()!=2)throw new IllegalArgumentException("Coppia grafica non disponibile");
+        var expected=db.queryForObject("SELECT COUNT(*) FROM ig_quiz_story s JOIN ig_quiz q ON q.id=s.quiz_id WHERE q.batch_id=? AND q.account_id=? AND q.position_no=?",Integer.class,batch,account(),position);
+        if(expected==null||expected==0||rows.size()!=expected)throw new IllegalArgumentException("Grafiche non disponibili");
         return rows.stream().map(x->Base64.getDecoder().decode(x)).toList();
     }
     public Batch status(String id){
