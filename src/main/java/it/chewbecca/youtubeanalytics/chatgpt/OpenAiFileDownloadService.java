@@ -72,9 +72,18 @@ public class OpenAiFileDownloadService {
     }
 
     private URI validate(FileInput file, boolean image) {
-        if (file == null || !StringUtils.hasText(file.downloadUrl()) ||
-                !StringUtils.hasText(file.fileId()) || !file.fileId().matches("file_[A-Za-z0-9_-]{8,128}")) {
-            throw error(DownloadError.INVALID_FILE, "Allegato ChatGPT mancante o identificativo file non valido");
+        boolean downloadUrlPresent = file != null && StringUtils.hasText(file.downloadUrl());
+        boolean fileIdPresent = file != null && StringUtils.hasText(file.fileId());
+        boolean fileIdValid = fileIdPresent && file.fileId().matches("file_[A-Za-z0-9_-]{8,128}");
+        if (!downloadUrlPresent || !fileIdValid) {
+            log.warn("MCP_FILE_VALIDATION_FAILED attachmentPresent={} downloadUrlPresent={} fileIdPresent={} fileIdValid={} uploadStarted=false",
+                    file != null, downloadUrlPresent, fileIdPresent, fileIdValid);
+            throw error(DownloadError.INVALID_FILE,
+                    "Allegato ChatGPT mancante o identificativo file non valido"
+                    + " (attachmentPresent=" + (file != null)
+                    + ", downloadUrlPresent=" + downloadUrlPresent
+                    + ", fileIdPresent=" + fileIdPresent
+                    + ", fileIdValid=" + fileIdValid + ")");
         }
         String filename = file.fileName() == null ? "" : file.fileName().toLowerCase(Locale.ROOT);
         String mime = file.mimeType() == null ? "" : file.mimeType().toLowerCase(Locale.ROOT);
