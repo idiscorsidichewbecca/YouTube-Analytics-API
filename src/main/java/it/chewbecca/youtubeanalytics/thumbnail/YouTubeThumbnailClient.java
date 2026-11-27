@@ -19,20 +19,49 @@ public class YouTubeThumbnailClient {
     private static final String API = "https://www.googleapis.com/youtube/v3";
     private static final String UPLOAD = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(YouTubeThumbnailClient.class);
+    private final CaptionExcerptCache cache;
     private final RestClient rest;
     private final GoogleAccessTokenService tokens;
 
-    public YouTubeThumbnailClient(RestClient googleRestClient, GoogleAccessTokenService tokens) {
+    public YouTubeThumbnailClient(RestClient googleRestClient, GoogleAccessTokenService tokens, CaptionExcerptCache cache) {
         this.rest = googleRestClient;
         this.tokens = tokens;
+        this.cache = cache;
     }
 
-    public Caption caption(String videoId) {
-        String token = tokens.getValidAccessToken();
-        String scopes = tokens.requireCredential().getScopes();
+    /** Single-instance, on-demand cache; no Google request on a valid hit. */
+    public synchronized Caption caption(String videoId) {
+        var credential = tokens.requireCredential();
+        String scopes = credential.getScopes();
         if (scopes == null || !List.of(scopes.split("\\s+")).contains(YoutubeOAuthService.PLAYLIST_SCOPE)) {
             return Caption.unavailable("PERMISSION_REQUIRED");
         }
+        String channel = credential.getChannelId();
+        if (channel == null || channel.isBlank() || videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) {
+            return Caption.unavailable("INVALID_CONTEXT");
+        }
+        try {
+            var cached = cache.find(channel, videoId);
+            if (cached.isPresent()) return cached.get();
+        } catch (RuntimeException e) {
+            log.warn("caption_cache_read_failed type={}", e.getClass().getSimpleName());
+            return Caption.unavailable("CACHE_UNAVAILABLE");
+        }
+        Caption caption = fetchCaption(videoId);
+        if ("AVAILABLE".equals(caption.state()) || "NOT_AVAILABLE".equals(caption.state())) {
+            try {
+                if (channel.equals(tokens.requireCredential().getChannelId())) cache.save(channel, videoId, caption);
+                else return Caption.unavailable("CHANNEL_CHANGED");
+            } catch (RuntimeException e) {
+                log.warn("caption_cache_write_failed type={}", e.getClass().getSimpleName());
+            }
+        }
+        return caption;
+    }
+
+    private Caption fetchCaption(String videoId) {
+        String token = tokens.getValidAccessToken();
         try {
             JsonNode result = rest.get()
                     .uri(API + "/captions?part=snippet&videoId={videoId}", videoId)
@@ -76,11 +105,11 @@ public class YouTubeThumbnailClient {
                     throw new GoogleApiException(res.getStatusCode().value(), "captions.download", null);
                 }).body(byte[].class);
         if (bytes == null || bytes.length == 0) return Caption.unavailable("NOT_AVAILABLE");
-        String text = new String(bytes, StandardCharsets.UTF_8);
-        boolean truncated = text.length() > 60_000;
+        var excerpt = CaptionExcerpt.fromVtt(new String(bytes, StandardCharsets.UTF_8));
+        if (excerpt.text().isBlank()) return Caption.unavailable("NOT_AVAILABLE");
         JsonNode snippet = track.path("snippet");
         return new Caption("AVAILABLE", snippet.path("language").asText(), snippet.path("trackKind").asText(),
-                truncated ? text.substring(0, 60_000) : text, truncated);
+                excerpt.text(), excerpt.truncated());
     }
 
     public void setThumbnail(String videoId, byte[] jpeg) {
@@ -96,6 +125,7 @@ public class YouTubeThumbnailClient {
         }
     }
 
+    // webVtt is the legacy MCP field name; it now contains a plain-text excerpt.
     public record Caption(String state, String language, String source, String webVtt, boolean truncated) {
         static Caption unavailable(String state) {
             return new Caption(state, null, null, null, false);
