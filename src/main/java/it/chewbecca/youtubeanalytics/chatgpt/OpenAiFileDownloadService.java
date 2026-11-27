@@ -44,6 +44,9 @@ public class OpenAiFileDownloadService {
     private final ChatGptBridgeProperties settings;
 
     @org.springframework.beans.factory.annotation.Autowired
+    public OpenAiFileDownloadService(ChatGptBridgeProperties settings, AttachmentHostAllowlist allowlist) {
+        this(settings, new OpenAiAzureFileHosts(allowlist));
+    }
     public OpenAiFileDownloadService(ChatGptBridgeProperties settings) {
         this(settings, new OpenAiAzureFileHosts());
     }
@@ -153,7 +156,7 @@ public class OpenAiFileDownloadService {
             // Host passato come argomento strutturato, mai URL completo / query string.
             log.warn("MCP_FILE_DOWNLOAD_FAILED code={} host={} uploadStarted=false", DownloadError.HOST_NOT_ALLOWED, host);
             throw new AttachmentDownloadException(DownloadError.HOST_NOT_ALLOWED,
-                    "Host dell'allegato non autorizzato. Verificare CHATGPT_FILE_ALLOWED_HOSTS nei log Render");
+                    "Host dell'allegato non autorizzato. Verificare nei log Render e nell'allowlist amministrativa");
         }
         return uri;
     }
