@@ -37,18 +37,20 @@ public class OpenAiFileDownloadService {
     private static final Pattern OPENAI_REGIONAL_FILE_HOST = Pattern.compile(
             "sdmntpr[a-z0-9](?:[a-z0-9-]{0,53}[a-z0-9])?\\.oaiusercontent\\.com",
             Pattern.CASE_INSENSITIVE);
-    // Azure Blob accounts are customer-controlled: a shared prefix alone does
-    // not establish ownership. Trust the two observed regional account names;
-    // further verified accounts can be added using the exact-host configuration.
-    private static final java.util.Set<String> OPENAI_AZURE_FILE_HOSTS = java.util.Set.of(
-            "oaisdmntprdenmarkeast.blob.core.windows.net",
-            "oaisdmntprpolandcentral.blob.core.windows.net");
+    private final OpenAiAzureFileHosts azureHosts;
 
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build();
     private final ChatGptBridgeProperties settings;
 
-    public OpenAiFileDownloadService(ChatGptBridgeProperties settings) { this.settings = settings; }
+    @org.springframework.beans.factory.annotation.Autowired
+    public OpenAiFileDownloadService(ChatGptBridgeProperties settings) {
+        this(settings, new OpenAiAzureFileHosts());
+    }
+    OpenAiFileDownloadService(ChatGptBridgeProperties settings, OpenAiAzureFileHosts azureHosts) {
+        this.settings = settings;
+        this.azureHosts = azureHosts;
+    }
 
     public record FileInput(@JsonProperty("download_url") String downloadUrl,
                             @JsonProperty("file_id") String fileId,
@@ -144,9 +146,9 @@ public class OpenAiFileDownloadService {
         // Host esatti configurati + sottodomini regionali OpenAI con pattern rigoroso.
         // Il controllo è sul valore URI.getHost(), non sul testo dell'URL.
         boolean allowed = OPENAI_REGIONAL_FILE_HOST.matcher(host).matches() ||
-                OPENAI_AZURE_FILE_HOSTS.contains(host.toLowerCase(Locale.ROOT)) ||
                 settings.allowedFileHosts().stream()
-                        .anyMatch(h -> h != null && host.equalsIgnoreCase(h.trim()));
+                        .anyMatch(h -> h != null && host.equalsIgnoreCase(h.trim())) ||
+                azureHosts.allows(host);
         if (!allowed) {
             // Host passato come argomento strutturato, mai URL completo / query string.
             log.warn("MCP_FILE_DOWNLOAD_FAILED code={} host={} uploadStarted=false", DownloadError.HOST_NOT_ALLOWED, host);
