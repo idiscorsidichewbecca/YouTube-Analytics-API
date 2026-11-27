@@ -77,7 +77,7 @@ public class ChewbeccaPerformanceMcpTools {
                                 num(args, "page", 1), num(args, "limit", 20), edits.cooling()))),
                 tool.tool("chewbecca_optimization_context", DATA + """
                         Fornisce la descrizione, lo stile delle copertine e, quando disponibile, il transcript
-                        del video lungo. Per le miniature riusa i riferimenti grafici esistenti del canale e
+                        del video lungo (estratto rappresentativo memorizzato per 28 giorni, non trascrizione completa). Per le miniature riusa i riferimenti grafici esistenti del canale e
                         genera in ChatGPT tre proposte distinte. Usa solo dettagli pertinenti al video e considera
                         gli interventi già provati e le note editoriali prima di proporre un nuovo cambiamento.
                         """, Map.of("video_id", text(), "with_caption", bool()), List.of("video_id"), READ, args -> {

@@ -11,6 +11,10 @@ import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.ArgumentMatchers.anyString;
+import java.util.Optional;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -21,7 +25,8 @@ class YouTubeThumbnailClientTest {
     private final GoogleAccessTokenService tokens = mock(GoogleAccessTokenService.class);
     private final RestClient.Builder builder = RestClient.builder();
     private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    private final YouTubeThumbnailClient client = new YouTubeThumbnailClient(builder.build(), tokens);
+    private final CaptionExcerptCache cache = mock(CaptionExcerptCache.class);
+    private final YouTubeThumbnailClient client = new YouTubeThumbnailClient(builder.build(), tokens, cache);
 
     @Test
     void prefersItalianManualCaptionsAndSkipsUnsuitableTracks() {
@@ -29,6 +34,8 @@ class YouTubeThumbnailClientTest {
         when(tokens.getValidAccessToken()).thenReturn("test-token");
         when(tokens.requireCredential()).thenReturn(credential);
         when(credential.getScopes()).thenReturn(YoutubeOAuthService.PLAYLIST_SCOPE);
+        when(credential.getChannelId()).thenReturn("channel");
+        when(cache.find(anyString(), anyString())).thenReturn(Optional.empty());
         server.expect(requestTo("https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=abcdefghijk"))
                 .andRespond(withSuccess("""
                         {"items":[
@@ -40,7 +47,12 @@ class YouTubeThumbnailClientTest {
         server.expect(requestTo("https://www.googleapis.com/youtube/v3/captions/manual?tfmt=vtt"))
                 .andRespond(withSuccess("WEBVTT\n\nTitolo e parlato", MediaType.TEXT_PLAIN));
 
-        assertThat(client.caption("abcdefghijk").webVtt()).contains("Titolo e parlato");
+        var caption = client.caption("abcdefghijk");
+        assertThat(caption.webVtt()).isEqualTo("Titolo e parlato");
+        verify(cache).save("channel", "abcdefghijk", caption);
+        when(cache.find("channel", "abcdefghijk")).thenReturn(Optional.of(caption));
+        assertThat(client.caption("abcdefghijk")).isEqualTo(caption);
+        verify(tokens, times(1)).getValidAccessToken();
         server.verify();
     }
 

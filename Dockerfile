@@ -8,7 +8,8 @@ RUN mvn -B -DskipTests dependency:go-offline
 
 COPY src ./src
 
-RUN mvn -B clean package -DskipTests
+# Gate deploys on the persistent caption cache and client regression tests.
+RUN mvn -B clean package -Dtest=CaptionExcerptCacheTest,YouTubeThumbnailClientTest
 
 
 FROM eclipse-temurin:21-jre-jammy
