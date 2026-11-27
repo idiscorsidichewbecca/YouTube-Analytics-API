@@ -30,6 +30,20 @@ public class InstagramGraphClient {
         if(!expected.equals(data.path("id").asText()))throw new GraphFailure("META_ACCOUNT_MISMATCH");
         return new Connection(expected,data.path("username").asText(""),true,allowed);
     }
+    /** Read-only capability probe: does not create containers or publish stories. */
+    public Map<String,Object> probeStories() {
+        try {
+            String id=account();
+            var data=get("/"+safeId(id)+"/stories",token(id,false),Map.of("fields","id","limit","1"));
+            if(data==null||!data.path("data").isArray())return Map.of("ok",false,"reason","INVALID_RESPONSE");
+            return Map.of("ok",true,"returnedCount",data.path("data").size());
+        } catch(GraphFailure e) {
+            return Map.of("ok",false,"reason",e.getMessage());
+        } catch(RuntimeException e) {
+            return Map.of("ok",false,"reason","CONNECTION_OR_CREDENTIAL_ERROR");
+        }
+    }
+
     public String createStory(String expected,String imageUrl) {
         return id(post("/"+safeId(expected)+"/media",token(expected,true),Map.of("media_type","STORIES","image_url",imageUrl)));
     }

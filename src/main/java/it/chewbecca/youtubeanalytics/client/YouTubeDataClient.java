@@ -63,6 +63,33 @@ public class YouTubeDataClient {
         return toChannelMetadata(item);
     }
 
+    /** Read-only probe of the official Community posts API; no content or credentials returned. */
+    public Map<String,Object> probeCommunityPosts() {
+        try {
+            String channel=accessTokenService.requireCredential().getChannelId();
+            URI uri=UriComponentsBuilder.fromUriString(BASE_URL+"/posts")
+                    .queryParam("part","id").queryParam("channelId",channel)
+                    .queryParam("maxResults",1).build().encode().toUri();
+            JsonNode result=get(uri,accessTokenService.getValidAccessToken(),"posts.list probe");
+            if(result==null||!result.path("items").isArray())
+                return Map.of("ok",false,"reason","INVALID_RESPONSE");
+            return Map.of("ok",true,"httpStatus",200,"returnedCount",result.path("items").size());
+        } catch(GoogleApiException e) {
+            return Map.of("ok",false,"httpStatus",e.getStatusCode(),"reason",safeGoogleReason(e));
+        } catch(RuntimeException e) {
+            return Map.of("ok",false,"reason","CONNECTION_OR_CREDENTIAL_ERROR");
+        }
+    }
+    public static String safeGoogleReason(GoogleApiException e) {
+        try {
+            var error=new com.fasterxml.jackson.databind.ObjectMapper().readTree(e.getResponseBody()).path("error");
+            String reason=error.path("errors").path(0).path("reason").asText("");
+            if(reason.isBlank())reason=error.path("status").asText("");
+            if(reason.matches("[A-Za-z][A-Za-z0-9_]{0,63}"))return reason;
+        } catch(Exception ignored) { }
+        return "GOOGLE_HTTP_"+e.getStatusCode();
+    }
+
     public List<VideoMetadata> getAllUploadedVideos(String uploadsPlaylistId) {
         return getAllUploadedVideos(uploadsPlaylistId, false);
     }

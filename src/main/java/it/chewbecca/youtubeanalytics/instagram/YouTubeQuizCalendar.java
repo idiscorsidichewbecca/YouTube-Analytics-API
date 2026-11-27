@@ -45,7 +45,7 @@ public class YouTubeQuizCalendar {
             return List.copyOf(result);
         } catch(RuntimeException ex) {
             // Do not expose tokens, API bodies or treat unavailable data as an empty calendar.
-            String reason=ex instanceof CalendarUnavailable c?c.reason():ex instanceof GoogleApiException g?"GOOGLE_HTTP_"+g.getStatusCode():stage+"_ERROR";
+            String reason=ex instanceof CalendarUnavailable c?c.reason():ex instanceof GoogleApiException g?"GOOGLE_HTTP_"+g.getStatusCode()+"_"+YouTubeDataClient.safeGoogleReason(g):stage+"_ERROR";
             log.warn("YOUTUBE_CALENDAR_UNAVAILABLE stage={} reason={} exceptionType={}",stage,reason,ex.getClass().getSimpleName());
             throw new CalendarUnavailable(reason);
         }
