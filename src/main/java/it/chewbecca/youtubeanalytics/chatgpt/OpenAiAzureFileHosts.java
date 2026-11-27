@@ -26,12 +26,21 @@ final class OpenAiAzureFileHosts {
     private static final Pattern CANDIDATE = Pattern.compile(
             "oaisdmntpr([a-z0-9]{1,14})\\.blob\\.core\\.windows\\.net");
     private final BiPredicate<String,String> cnameVerifier;
+    private final java.util.function.Predicate<String> approvedHost;
     private final Cache<String,Boolean> verified = Caffeine.newBuilder()
             .maximumSize(64).expireAfterWrite(Duration.ofMinutes(5)).build();
 
-    OpenAiAzureFileHosts() { this(OpenAiAzureFileHosts::hasDirectCname); }
+    OpenAiAzureFileHosts() { this(OpenAiAzureFileHosts::hasDirectCname, host -> false); }
+    OpenAiAzureFileHosts(AttachmentHostAllowlist allowlist) {
+        this(OpenAiAzureFileHosts::hasDirectCname, allowlist::contains);
+    }
     OpenAiAzureFileHosts(BiPredicate<String,String> cnameVerifier) {
+        this(cnameVerifier, host -> false);
+    }
+    OpenAiAzureFileHosts(BiPredicate<String,String> cnameVerifier,
+                         java.util.function.Predicate<String> approvedHost) {
         this.cnameVerifier = cnameVerifier;
+        this.approvedHost = approvedHost;
     }
 
     boolean allows(String hostname) {
@@ -39,6 +48,7 @@ final class OpenAiAzureFileHosts {
         if (OBSERVED.contains(host)) return true;
         var match = CANDIDATE.matcher(host);
         if (!match.matches()) return false;
+        if (approvedHost.test(host)) return true;
         if (Boolean.TRUE.equals(verified.getIfPresent(host))) return true;
         String trustedAlias = "sdmntpr" + match.group(1) + ".oaiusercontent.com.";
         try {
