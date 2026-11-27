@@ -8,7 +8,8 @@ import static org.assertj.core.api.Assertions.*;
 
 class OpenAiFileDownloadServiceTest {
     private final OpenAiFileDownloadService service = new OpenAiFileDownloadService(
-            new ChatGptBridgeProperties(false, "", List.of("files.oaiusercontent.com", "files.openai.com")));
+            new ChatGptBridgeProperties(false, "", List.of("files.oaiusercontent.com", "files.openai.com")),
+            new OpenAiAzureFileHosts((alias, target) -> false));
 
     private OpenAiFileDownloadService.FileInput input(String url) {
         return new OpenAiFileDownloadService.FileInput(url, "file_12345678", "video/mp4", "reel.mp4");
@@ -126,10 +127,34 @@ class OpenAiFileDownloadServiceTest {
 
     @Test void allowsObservedAzureRegionalAccountsWithoutEnvironmentUpdates() {
         for (String host : List.of("oaisdmntprdenmarkeast.blob.core.windows.net",
-                "oaisdmntprpolandcentral.blob.core.windows.net")) {
+                "oaisdmntprpolandcentral.blob.core.windows.net", "oaisdmntprcentralus.blob.core.windows.net")) {
             assertThat(service.validate(input("https://" + host + "/video.mp4?sig=hidden")).getHost())
                     .isEqualTo(host);
         }
+    }
+
+    @Test void allowsNewAzureRegionOnlyWhenTrustedAliasReferencesExactAccount() {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var policy = new OpenAiAzureFileHosts((alias, target) -> {
+            calls.incrementAndGet();
+            return alias.equals("sdmntprjapanwest.oaiusercontent.com.")
+                    && target.equals("oaisdmntprjapanwest.blob.core.windows.net");
+        });
+        var verified = new OpenAiFileDownloadService(
+                new ChatGptBridgeProperties(false, "", List.of()), policy);
+        String host = "oaisdmntprjapanwest.blob.core.windows.net";
+        assertThat(verified.validate(input("https://" + host + "/video.mp4")).getHost()).isEqualTo(host);
+        assertThat(verified.validate(input("https://" + host + "/other.mp4")).getHost()).isEqualTo(host);
+        assertThat(calls.get()).isEqualTo(1);
+        assertThatThrownBy(() -> verified.validate(input("https://oaisdmntprfake.blob.core.windows.net/video.mp4")))
+                .isInstanceOf(OpenAiFileDownloadService.AttachmentDownloadException.class)
+                .extracting("code").isEqualTo(OpenAiFileDownloadService.DownloadError.HOST_NOT_ALLOWED);
+    }
+
+    @Test void dnsFailureDoesNotGrantAccess() {
+        var policy = new OpenAiAzureFileHosts((alias, target) -> { throw new IllegalStateException("DNS offline"); });
+        assertThat(policy.allows("oaisdmntprnewregion.blob.core.windows.net")).isFalse();
+        assertThat(policy.allows("oaisdmntprcentralus.blob.core.windows.net")).isTrue();
     }
 
     @Test void rejectsUnverifiedAzureAccountsAndSpoofedHosts() {
